@@ -1,0 +1,149 @@
+name: Publish container image
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: Verify API
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 用 git ls-files 限定范围，避免 gofmt 递归遍历 frontend/*/node_modules
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [[ -n "$unformatted" ]]; then
+            echo "::error::The following Go files are not formatted:"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./...
+
+  frontend:
+    name: Verify frontends
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.1'
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/admin/pnpm-lock.yaml
+            frontend/user/pnpm-lock.yaml
+
+      # 用子 shell cd 而非 `pnpm --dir`：后者不会读取子目录的 packageManager 字段，
+      # 在启用 corepack 的环境下会用错 pnpm 版本
+      - name: Install frontend dependencies
+        run: |
+          (cd frontend/admin && pnpm install --frozen-lockfile)
+          (cd frontend/user  && pnpm install --frozen-lockfile)
+
+      - name: Run admin frontend tests
+        run: (cd frontend/admin && pnpm run test)
+
+      - name: Run user frontend tests
+        run: (cd frontend/user && pnpm run test)
+
+  publish:
+    name: Build and push image
+    needs: [api, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image and application version
+        id: image
+        shell: bash
+        run: |
+          image_name="${GITHUB_REPOSITORY,,}"
+          version="$GITHUB_REF_NAME"
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            version="${version}-${GITHUB_SHA:0:7}"
+          fi
+          echo "name=ghcr.io/$image_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.image.outputs.version }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=fullstack-image
+          cache-to: type=gha,scope=fullstack-image,mode=max

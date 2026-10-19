@@ -68,7 +68,7 @@ application: the Go backend, the customer storefront, and the admin panel.
 │   └── user/                 # customer storefront SPA (dev :5173)
 ├── config.yml.example
 ├── Dockerfile                # single full-stack image
-└── .goreleaser.yaml
+└── .github/workflows/        # CI and container image publishing
 ```
 
 Runtime directories created on first start: `db/` (SQLite), `uploads/`, `logs/`.
@@ -166,65 +166,56 @@ Chinese, and English. Do not hard-code user-facing strings on either side.
 
 ## Quick Start (Deploy)
 
-### Official one-click installer (Ubuntu / Debian)
+Container images are published to `ghcr.io/<owner>/<repository>` for `linux/amd64`
+and `linux/arm64`. The image path follows the GitHub repository name, in lowercase.
 
-On a fresh Ubuntu 22.04+ or Debian 12+ server, download and run the official
-interactive installer:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dujiao-next/dujiao-next/main/scripts/dujiao-next-manager.sh \
-  -o /tmp/dujiao-next-manager.sh
-sudo bash /tmp/dujiao-next-manager.sh install
-```
-
-The installer deploys the release binary with systemd, an isolated local Redis,
-Nginx, SQLite, and a Let's Encrypt certificate. After installation, reopen the
-management menu with:
+Copy `config.yml.example` to `config.yml`, then configure at least `jwt.secret`,
+`user_jwt.secret`, and `web.admin_path`. Point both `redis.host` and `queue.host`
+to a Redis instance reachable from the container; the default `127.0.0.1` points
+to the application container itself.
 
 ```bash
-sudo dujiao-next-manager
-```
-
-Common automation-friendly commands are also available:
-
-```bash
-sudo dujiao-next-manager status
-sudo dujiao-next-manager logs app
-sudo dujiao-next-manager restart
-sudo dujiao-next-manager configure-domain
-sudo dujiao-next-manager configure-admin-path
-sudo dujiao-next-manager renew-cert
-sudo dujiao-next-manager admin-reset-password
-sudo dujiao-next-manager admin-reset-2fa
-sudo dujiao-next-manager uninstall
-```
-
-The first release supports a single non-wildcard domain on Ubuntu/Debian only.
-It does not adopt an existing manual installation. If SMTP is skipped, configure
-it in the admin panel before enabling email-verification registration. Application
-data lives in `/opt/dujiao-next`; installer state is stored in
-`/etc/dujiao-next/install-state.json`. TLS failures leave only the ACME challenge
-endpoint enabled, and `install` can be rerun after DNS or firewall repair. Safe
-uninstall creates and verifies a `0600` recovery archive under
-`/var/backups/dujiao-next` before deleting managed data.
-
-### Manual binary installation
-
-Download the latest `dujiao-next_*.tar.gz` from [Releases](https://github.com/dujiao-next/dujiao-next/releases):
-
-```bash
-tar -xzf dujiao-next_*.tar.gz
 cp config.yml.example config.yml
-# edit config.yml: set jwt.secret, user_jwt.secret, and web.admin_path
-./dujiao-next
+# Edit config.yml before starting the container.
+mkdir -p db uploads logs
+IMAGE="ghcr.io/<owner>/<repository>:latest"
+docker run -d --name dujiao-next --restart unless-stopped \
+  -p 8080:8080 \
+  -v "$PWD/config.yml:/app/config.yml:ro" \
+  -v "$PWD/db:/app/db" \
+  -v "$PWD/uploads:/app/uploads" \
+  -v "$PWD/logs:/app/logs" \
+  "$IMAGE"
 ```
 
-Full instructions: https://dujiao-next.com/deploy/
+Replace `<owner>/<repository>` with your image path. A private GHCR package
+requires authentication before pulling. To upgrade, pull the desired image and
+recreate the container with the same configuration and data mounts.
 
-Or with Docker:
+The single `docker-build.yml` workflow runs Go formatting, vet, and tests alongside
+both frontends' tests. Both verification jobs must pass before Docker builds and
+pushes the image. The Dockerfile handles frontend type checks and builds, embeds
+the assets, and compiles the server; these builds are not repeated in separate jobs.
+The legacy binary installer is outside this image publishing workflow.
+
+The workflow publishes images on these events:
+
+| Trigger | Image tags |
+| --- | --- |
+| Push to `main` | `main`, `latest`, `sha-<full commit SHA>` |
+| Push to `dev` | `dev`, `sha-<full commit SHA>` |
+| Push tag `v1.2.3` | `v1.2.3`, `1.2.3`, `latest`, `sha-<full commit SHA>` |
+| Push prerelease tag `v1.2.3-beta.1` | `v1.2.3-beta.1`, `1.2.3-beta.1`, `sha-<full commit SHA>` |
+| Manual dispatch | Tags for the selected branch or tag, plus `sha-<full commit SHA>` |
+
+`latest` follows the repository's default branch and stable semantic-version tags;
+prerelease tags do not update it. Pull requests do not trigger this workflow.
+No GitHub Releases binary archives are generated.
+
+To build an image locally:
 
 ```bash
-docker run -d -p 8080:8080 -v $PWD/config.yml:/app/config.yml:ro dujiaonext/dujiao-next:latest
+docker build --build-arg APP_VERSION=local -t dujiao-next:local .
 ```
 
 ## Quick Start (Develop)
@@ -247,12 +238,8 @@ development-only concern.
 
 ## Building the Full-Stack Binary
 
-```bash
-goreleaser build --snapshot --single-target --clean
-```
-
-This builds both frontends, embeds them, and compiles with `-tags fullstack` — the same path
-CI uses for releases. The manual equivalent:
+Docker is the release artifact. For local development, you can also build a
+standalone full-stack binary after installing both frontends' dependencies:
 
 ```bash
 (cd frontend/admin && pnpm run build:fullstack)   # injects the <base> placeholder
