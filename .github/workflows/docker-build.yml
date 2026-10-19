@@ -1,22 +1,25 @@
 name: Publish container image
 
+# 仅 idid 主分支、id-* 功能版本分支的推送自动触发；PR、标签推送和其他分支不触发。
 on:
   push:
     branches:
-      - main
-      - dev
-    tags:
-      - 'v*'
+      - idid
+      - 'id-*'
+  # 保留手动执行入口，可选择要校验和构建的分支或标签。
   workflow_dispatch:
 
+# 默认只读仓库；镜像写入权限仅授予 publish 任务。
 permissions:
   contents: read
 
+# 同一个分支或标签有新运行时，取消旧运行，减少重复校验和构建。
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # 后端与前端校验并行运行；生产构建统一交给 Dockerfile。
   api:
     name: Verify API
     runs-on: ubuntu-latest
@@ -48,6 +51,7 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+  # 运行两个前端的测试；类型检查和生产打包在 Docker 构建阶段执行。
   frontend:
     name: Verify frontends
     runs-on: ubuntu-latest
@@ -60,12 +64,14 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
+          # 与两个前端 package.json 的 packageManager 版本保持一致。
           version: 10.34.3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24.11.1'
+          # 按两个 lockfile 缓存 pnpm 依赖，安装时仍校验锁文件。
           cache: pnpm
           cache-dependency-path: |
             frontend/admin/pnpm-lock.yaml
@@ -86,6 +92,7 @@ jobs:
 
   publish:
     name: Build and push image
+    # 两个校验任务全部成功才发布；任一失败或被取消都会跳过发布。
     needs: [api, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -97,6 +104,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 镜像地址为小写 ghcr.io/<owner>/<repository>。
+      # 分支构建的应用版本为“分支名-短 SHA”；手动选择标签时直接使用标签名。
       - name: Resolve image and application version
         id: image
         shell: bash
@@ -109,12 +118,14 @@ jobs:
           echo "name=ghcr.io/$image_name" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # Go 使用交叉编译；最终 Alpine 阶段的 RUN 指令仍需 QEMU 支持异构执行。
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # 使用本次运行的 GITHUB_TOKEN 登录 GHCR，无需额外配置登录密钥。
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
         with:
@@ -122,18 +133,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 为镜像添加分支名（或手动选择的标签名）和完整 SHA 标签。
+      # 关闭自动 latest，仅 idid 构建更新 latest，功能版本镜像不会覆盖它。
       - name: Generate image metadata
         id: metadata
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.image.outputs.name }}
+          flavor: latest=false
           tags: |
             type=ref,event=branch
             type=ref,event=tag
-            type=semver,pattern={{version}}
             type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/idid' }}
 
+      # Dockerfile 完成前端打包、资源嵌入和后端编译，并发布 amd64 / arm64 镜像。
       - name: Build and push multi-platform image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -145,5 +159,6 @@ jobs:
             APP_VERSION=${{ steps.image.outputs.version }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          # 复用 GitHub Actions 构建缓存，mode=max 同时保留中间构建阶段的缓存。
           cache-from: type=gha,scope=fullstack-image
           cache-to: type=gha,scope=fullstack-image,mode=max

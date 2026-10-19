@@ -202,14 +202,14 @@ The workflow publishes images on these events:
 
 | Trigger | Image tags |
 | --- | --- |
-| Push to `main` | `main`, `latest`, `sha-<full commit SHA>` |
-| Push to `dev` | `dev`, `sha-<full commit SHA>` |
-| Push tag `v1.2.3` | `v1.2.3`, `1.2.3`, `latest`, `sha-<full commit SHA>` |
-| Push prerelease tag `v1.2.3-beta.1` | `v1.2.3-beta.1`, `1.2.3-beta.1`, `sha-<full commit SHA>` |
-| Manual dispatch | Tags for the selected branch or tag, plus `sha-<full commit SHA>` |
+| Push to `idid` | `idid`, `latest`, `sha-<full commit SHA>` |
+| Push to an `id-*` branch, e.g. `id-payment` | `id-payment`, `sha-<full commit SHA>` |
+| Manual dispatch | Selected branch or tag name, plus `sha-<full commit SHA>`; `latest` only on `idid` |
 
-`latest` follows the repository's default branch and stable semantic-version tags;
-prerelease tags do not update it. Pull requests do not trigger this workflow.
+`idid` is the core branch where completed feature versions are merged; only builds
+of this branch update `latest`. Feature versions are developed on `id-*` branches,
+whose images do not update `latest`. `main` is reserved for syncing upstream.
+Pushes to other branches, tag pushes, and pull requests do not trigger this workflow.
 No GitHub Releases binary archives are generated.
 
 To build an image locally:
