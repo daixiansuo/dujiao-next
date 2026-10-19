@@ -1,0 +1,30 @@
+.github/workflows/docker-build.yml
+  s_cf81b6361a4ba8::t_6b560631c649ea 51-52,69-72,89,104
+  s_cf81b6361a4ba8::t_76ca84fd14f439 1,8-10,16,87-88,90-98,100-102,105-110,112-119,121-123,125-149
+README.md
+  s_cf81b6361a4ba8::t_150894227dc6c3 170
+  s_cf81b6361a4ba8::t_76ca84fd14f439 71,169,172-175,178-188,191-193,203-209,211,213,215,218,241-242
+  s_cf81b6361a4ba8::t_6b560631c649ea 195-199,201
+  s_cf81b6361a4ba8::t_730ad24d1b3df1 212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "cec03477dd224364030fef870bb4b433b2838ef6",
+  "prompts": {},
+  "humans": {
+    "h_68b39d2fe422d8": {
+      "author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  },
+  "sessions": {
+    "s_cf81b6361a4ba8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1540c-3945-73c0-9507-7a839d2fa4e3",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
