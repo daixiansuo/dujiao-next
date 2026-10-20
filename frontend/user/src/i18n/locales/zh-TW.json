@@ -47,7 +47,7 @@
   "nav": {
     "home": "首頁",
     "products": "商品中心",
-    "blog": "部落格",
+    "blog": "教學",
     "notice": "公告",
     "about": "關於"
   },
@@ -102,7 +102,8 @@
     "rights": "保留所有權利",
     "terms": "服務條款",
     "privacy": "隱私政策",
-    "email": "信箱",
+    "email": "Email",
+    "x": "X",
     "supportUrl": "線上客服"
   },
   "notFoundPage": {

@@ -7,14 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAdminAuthStore } from '@/stores/auth'
+import { useSiteBrandStore } from '@/stores/siteBrand'
 import { adminAPI, type CaptchaPayload } from '@/api/admin'
 import { applySiteIcon } from '@/utils/favicon'
+import { getImageUrl } from '@/utils/image'
 import ImageCaptcha from '@/components/captcha/ImageCaptcha.vue'
 import TurnstileCaptcha from '@/components/captcha/TurnstileCaptcha.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const authStore = useAdminAuthStore()
+const siteBrandStore = useSiteBrandStore()
+const siteName = computed(() => siteBrandStore.siteName || t('admin.login.title'))
+const siteLogo = computed(() => getImageUrl(siteBrandStore.siteLogo))
 
 type Step = 'password' | 'totp'
 const step = ref<Step>('password')
@@ -163,6 +168,7 @@ const loadCaptchaConfig = async () => {
   try {
     const res = await adminAPI.getPublicConfig()
     const payload = res.data?.data as any
+    siteBrandStore.setBrand(payload?.brand)
     applySiteIcon(payload?.brand?.site_icon)
     captchaConfig.value = payload?.captcha || null
   } catch {
@@ -186,11 +192,13 @@ onUnmounted(() => {
     <div class="w-full max-w-md">
       <Card class="border-border shadow-sm">
         <CardHeader>
-          <CardTitle class="text-2xl">
-            {{ step === 'password' ? t('admin.login.title') : t('admin.login.totp.title') }}
-          </CardTitle>
-          <p class="text-sm text-muted-foreground mt-1">
-            {{ step === 'password' ? t('admin.login.subtitle') : t('admin.login.totp.subtitle') }}
+          <div class="flex min-w-0 items-center justify-center gap-3">
+            <img v-if="siteLogo" :src="siteLogo" :alt="siteName" class="h-10 w-10 shrink-0 object-contain" />
+            <CardTitle class="min-w-0 break-words text-center text-2xl">{{ siteName }}</CardTitle>
+          </div>
+          <p v-if="step === 'totp'" class="text-sm font-medium">{{ t('admin.login.totp.title') }}</p>
+          <p v-if="step === 'totp'" class="text-sm text-muted-foreground mt-1">
+            {{ t('admin.login.totp.subtitle') }}
           </p>
         </CardHeader>
         <CardContent>
@@ -278,20 +286,6 @@ onUnmounted(() => {
           </form>
         </CardContent>
       </Card>
-      <p class="mt-4 flex items-center justify-center gap-1 text-center text-xs text-muted-foreground">
-        <span>© {{ new Date().getFullYear() }} Dujiao-Next ·</span>
-        <a
-          href="https://github.com/dujiao-next"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1 underline-offset-2 hover:underline"
-        >
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 .5C5.648.5.5 5.648.5 12c0 5.084 3.292 9.4 7.86 10.922.575.106.784-.25.784-.556 0-.273-.01-1-.016-1.962-3.197.694-3.872-1.54-3.872-1.54-.522-1.326-1.274-1.678-1.274-1.678-1.042-.713.079-.699.079-.699 1.152.081 1.758 1.183 1.758 1.183 1.024 1.755 2.688 1.248 3.343.954.104-.742.401-1.248.73-1.535-2.552-.29-5.236-1.276-5.236-5.678 0-1.254.448-2.28 1.182-3.084-.118-.29-.512-1.457.112-3.04 0 0 .964-.308 3.158 1.178a10.98 10.98 0 0 1 2.876-.387c.976.004 1.96.132 2.878.387 2.192-1.486 3.154-1.178 3.154-1.178.626 1.583.232 2.75.114 3.04.736.804 1.18 1.83 1.18 3.084 0 4.413-2.688 5.384-5.248 5.668.412.354.78 1.052.78 2.12 0 1.53-.014 2.764-.014 3.14 0 .31.206.668.79.554C20.212 21.396 23.5 17.083 23.5 12 23.5 5.648 18.352.5 12 .5Z" />
-          </svg>
-          <span>https://github.com/dujiao-next</span>
-        </a>
-      </p>
     </div>
   </div>
 </template>

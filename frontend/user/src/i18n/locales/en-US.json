@@ -47,7 +47,7 @@
   "nav": {
     "home": "Home",
     "products": "Products",
-    "blog": "Blog",
+    "blog": "Tutorials",
     "notice": "Notice",
     "about": "About"
   },
@@ -103,6 +103,7 @@
     "terms": "Terms of Service",
     "privacy": "Privacy Policy",
     "email": "Email",
+    "x": "X",
     "supportUrl": "Support"
   },
   "notFoundPage": {

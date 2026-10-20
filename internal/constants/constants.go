@@ -467,6 +467,7 @@ const (
 const (
 	SettingKeySiteConfig               = "site_config"
 	SettingKeyOrderConfig              = "order_config"
+	SettingKeyDatabaseBackupConfig     = "database_backup_config"
 	SettingKeySMTPConfig               = "smtp_config"
 	SettingKeyCaptchaConfig            = "captcha_config"
 	SettingKeyTelegramAuthConfig       = "telegram_auth_config"

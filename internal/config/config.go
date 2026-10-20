@@ -18,6 +18,7 @@ type Config struct {
 	Server       ServerConfig       `mapstructure:"server"`
 	Log          LogConfig          `mapstructure:"log"`
 	Database     DatabaseConfig     `mapstructure:"database"`
+	Backup       BackupConfig       `mapstructure:"backup"`
 	JWT          JWTConfig          `mapstructure:"jwt"`
 	UserJWT      JWTConfig          `mapstructure:"user_jwt"`
 	Bootstrap    BootstrapConfig    `mapstructure:"bootstrap"`
@@ -33,6 +34,13 @@ type Config struct {
 	Captcha      CaptchaConfig      `mapstructure:"captcha"`
 	Web          WebConfig          `mapstructure:"web"`
 	Reseller     ResellerConfig     `mapstructure:"reseller"`
+}
+
+// BackupConfig contains local execution options; storage and schedules live in settings.
+type BackupConfig struct {
+	PgDumpPath     string `mapstructure:"pg_dump_path"`
+	TempDir        string `mapstructure:"temp_dir"`
+	TimeoutSeconds int    `mapstructure:"timeout_seconds"`
 }
 
 // AppConfig 应用级配置
@@ -421,6 +429,9 @@ func Load() *Config {
 	viper.SetDefault("captcha.turnstile.secret_key", "")
 	viper.SetDefault("captcha.turnstile.verify_url", "https://challenges.cloudflare.com/turnstile/v0/siteverify")
 	viper.SetDefault("captcha.turnstile.timeout_ms", 2000)
+	viper.SetDefault("backup.pg_dump_path", "pg_dump")
+	viper.SetDefault("backup.temp_dir", "")
+	viper.SetDefault("backup.timeout_seconds", 3600)
 	viper.SetDefault("web.admin_path", "/admin")
 	viper.SetDefault("reseller.enabled", false)
 	viper.SetDefault("reseller.main_hosts", []string{"localhost", "127.0.0.1", "::1"})

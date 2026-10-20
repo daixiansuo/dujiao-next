@@ -1,5 +1,6 @@
 import { api } from './client'
 import type {
+  AdminBackupConfigUpdate,
   AdminCategory,
   AdminProduct,
   AdminFulfillment,
@@ -388,6 +389,14 @@ export const adminAPI = {
   deleteBanner: (id: number) => api.delete(`/admin/banners/${id}`),
   getSettings: (params?: Record<string, unknown>) => api.get('/admin/settings', { params }),
   updateSettings: (data: Record<string, unknown>) => api.put('/admin/settings', data),
+  getBackupConfig: () => api.get('/admin/backups/config'),
+  updateBackupConfig: (data: AdminBackupConfigUpdate) => api.put('/admin/backups/config', data),
+  testBackupConnection: () => api.post('/admin/backups/test'),
+  getBackupStatus: () => api.get('/admin/backups/status'),
+  getBackupRecords: (params: { page: number; page_size: number }) => api.get('/admin/backups/records', { params }),
+  createBackup: () => api.post('/admin/backups/records', {}),
+  getBackupDownload: (id: string) => api.post(`/admin/backups/records/${encodeURIComponent(id)}/download`),
+  deleteBackup: (id: string) => api.delete(`/admin/backups/records/${encodeURIComponent(id)}`),
   getHomeAnnouncement: () => api.get('/admin/settings', { params: { key: 'home_announcement' } }),
   updateHomeAnnouncement: (value: Record<string, unknown>) => api.put('/admin/settings', { key: 'home_announcement', value }),
   getSMTPSettings: () => api.get('/admin/settings/smtp'),

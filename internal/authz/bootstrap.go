@@ -228,6 +228,12 @@ func BuiltinRoleSeeds() []RoleSeed {
 			Policies: []Policy{
 				// 系统设置
 				{Object: "/admin/settings", Action: "*"},
+				{Object: "/admin/backups/config", Action: "*"},
+				{Object: "/admin/backups/test", Action: "POST"},
+				{Object: "/admin/backups/status", Action: "GET"},
+				{Object: "/admin/backups/records", Action: "*"},
+				{Object: "/admin/backups/records/:id", Action: "DELETE"},
+				{Object: "/admin/backups/records/:id/download", Action: "POST"},
 				{Object: "/admin/settings/smtp", Action: "*"},
 				{Object: "/admin/settings/smtp/test", Action: "POST"},
 				{Object: "/admin/settings/captcha", Action: "*"},

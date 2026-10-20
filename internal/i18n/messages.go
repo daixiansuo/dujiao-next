@@ -16,6 +16,15 @@ const (
 
 var messages = map[string]map[string]string{
 	LocaleZH: {
+		"error.backup_busy":           "已有备份任务正在执行",
+		"error.backup_not_found":      "备份记录不存在",
+		"error.backup_unsupported":    "数据库备份仅支持 PostgreSQL",
+		"error.backup_invalid_config": "备份配置不合法，请检查配置",
+		"error.backup_target_change":  "已有备份时不能切换存储目标",
+		"error.backup_not_ready":      "备份尚未就绪，请检查环境和配置",
+		"error.backup_failed":         "备份操作失败",
+		"error.backup_config_private": "请通过数据库备份专用接口读取配置",
+
 		"error.jwt_secret_missing":                       "JWT secret 未配置",
 		"error.auth_header_missing":                      "缺少 Authorization header",
 		"error.auth_header_invalid":                      "Authorization header 格式错误",
@@ -226,6 +235,7 @@ var messages = map[string]map[string]string{
 		"error.reseller_support_telegram_invalid":        "Telegram 链接格式不正确，请使用 https://telegram.me/ 或 https://t.me/ 开头的链接",
 		"error.reseller_support_whatsapp_invalid":        "WhatsApp 链接格式不正确，请使用 https://wa.me/ 开头的链接",
 		"error.reseller_support_email_invalid":           "客服邮箱格式不正确，请检查后重试",
+		"error.site_contact_x_invalid":                   "X（推特）链接格式不正确，请使用 https://x.com/ 或 https://twitter.com/ 开头的链接",
 		"error.reseller_support_url_invalid":             "客服链接格式不正确，请使用 https:// 开头的完整链接",
 		"error.reseller_image_invalid":                   "图片地址无效，请重新上传或填写以 https:// 开头的完整链接",
 		"error.reseller_link_invalid":                    "链接地址格式不正确，请使用 https:// 开头的完整链接",
@@ -391,6 +401,15 @@ var messages = map[string]map[string]string{
 		"error.invalid_product_status":              "无效的商品状态参数",
 	},
 	LocaleTW: {
+		"error.backup_busy":           "已有備份任務正在執行",
+		"error.backup_not_found":      "備份記錄不存在",
+		"error.backup_unsupported":    "資料庫備份僅支援 PostgreSQL",
+		"error.backup_invalid_config": "備份設定不合法，請檢查設定",
+		"error.backup_target_change":  "已有備份時不能切換儲存目標",
+		"error.backup_not_ready":      "備份尚未就緒，請檢查環境與設定",
+		"error.backup_failed":         "備份操作失敗",
+		"error.backup_config_private": "請透過資料庫備份專用介面讀取設定",
+
 		"error.jwt_secret_missing":                       "JWT secret 未配置",
 		"error.auth_header_missing":                      "缺少 Authorization header",
 		"error.auth_header_invalid":                      "Authorization header 格式錯誤",
@@ -601,6 +620,7 @@ var messages = map[string]map[string]string{
 		"error.reseller_support_telegram_invalid":        "Telegram 連結格式不正確，請使用 https://telegram.me/ 或 https://t.me/ 開頭的連結",
 		"error.reseller_support_whatsapp_invalid":        "WhatsApp 連結格式不正確，請使用 https://wa.me/ 開頭的連結",
 		"error.reseller_support_email_invalid":           "客服信箱格式不正確，請檢查後重試",
+		"error.site_contact_x_invalid":                   "X（Twitter）連結格式不正確，請使用 https://x.com/ 或 https://twitter.com/ 開頭的連結",
 		"error.reseller_support_url_invalid":             "客服連結格式不正確，請使用 https:// 開頭的完整連結",
 		"error.reseller_image_invalid":                   "圖片地址無效，請重新上傳或填寫以 https:// 開頭的完整連結",
 		"error.reseller_link_invalid":                    "連結地址格式不正確，請使用 https:// 開頭的完整連結",
@@ -766,6 +786,15 @@ var messages = map[string]map[string]string{
 		"error.invalid_product_status":              "無效的商品狀態參數",
 	},
 	LocaleEN: {
+		"error.backup_busy":           "A backup is already running",
+		"error.backup_not_found":      "Backup not found",
+		"error.backup_unsupported":    "Database backups require PostgreSQL",
+		"error.backup_invalid_config": "Invalid backup configuration",
+		"error.backup_target_change":  "Cannot change storage target while backups exist",
+		"error.backup_not_ready":      "Backup is not ready; check the environment and configuration",
+		"error.backup_failed":         "Backup operation failed",
+		"error.backup_config_private": "Read backup configuration through its dedicated endpoint",
+
 		"error.jwt_secret_missing":                       "JWT secret is not configured",
 		"error.auth_header_missing":                      "Missing Authorization header",
 		"error.auth_header_invalid":                      "Invalid Authorization header format",
@@ -976,6 +1005,7 @@ var messages = map[string]map[string]string{
 		"error.reseller_support_telegram_invalid":        "Invalid Telegram link; it must start with https://telegram.me/ or https://t.me/",
 		"error.reseller_support_whatsapp_invalid":        "Invalid WhatsApp link; it must start with https://wa.me/",
 		"error.reseller_support_email_invalid":           "Invalid support email address, please check and try again",
+		"error.site_contact_x_invalid":                   "Invalid X (Twitter) link; use an HTTPS link on x.com or twitter.com",
 		"error.reseller_support_url_invalid":             "Invalid support URL; please use a full link starting with https://",
 		"error.reseller_image_invalid":                   "Invalid image address; re-upload or use a full link starting with https://",
 		"error.reseller_link_invalid":                    "Invalid link address; please use a full link starting with https://",

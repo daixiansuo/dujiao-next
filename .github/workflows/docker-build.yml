@@ -149,6 +149,7 @@ jobs:
 
       # Dockerfile 完成前端打包、资源嵌入和后端编译，并发布 amd64 / arm64 镜像。
       - name: Build and push multi-platform image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -162,3 +163,40 @@ jobs:
           # 复用 GitHub Actions 构建缓存，mode=max 同时保留中间构建阶段的缓存。
           cache-from: type=gha,scope=fullstack-image
           cache-to: type=gha,scope=fullstack-image,mode=max
+
+      # 使用本次构建的真实输出展示可用镜像，与 Docker 默认构建摘要一起显示。
+      - name: Publish image summary
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          APP_VERSION: ${{ steps.image.outputs.version }}
+          IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo '### Dujiao-Next image published'
+            echo
+            printf -- '- Image: `%s`\n' "$IMAGE_NAME"
+            printf -- '- App version: `%s`\n' "$APP_VERSION"
+            printf -- '- Digest: `%s`\n' "$IMAGE_DIGEST"
+            echo '- Platforms: `linux/amd64`, `linux/arm64`'
+            echo
+            echo 'Tags:'
+            echo '```text'
+            printf '%s\n' "$IMAGE_TAGS"
+            echo '```'
+            echo
+            echo 'Pull by tag:'
+            echo '```bash'
+            while IFS= read -r tag; do
+              if [[ -n "$tag" ]]; then
+                printf 'docker pull %s\n' "$tag"
+              fi
+            done <<< "$IMAGE_TAGS"
+            echo '```'
+            echo
+            echo 'Pull this exact build:'
+            echo '```bash'
+            printf 'docker pull %s@%s\n' "$IMAGE_NAME" "$IMAGE_DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

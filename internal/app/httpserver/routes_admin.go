@@ -10,6 +10,7 @@ import (
 	affiliatetransport "github.com/dujiao-next/internal/modules/affiliate/transport/http"
 	apicredentialtransport "github.com/dujiao-next/internal/modules/apicredential/transport/http"
 	auditlogtransport "github.com/dujiao-next/internal/modules/auditlog/transport/http"
+	backuphttp "github.com/dujiao-next/internal/modules/backup/transport/http"
 	cardsecrettransport "github.com/dujiao-next/internal/modules/cardsecret/transport/http"
 	categoryhttp "github.com/dujiao-next/internal/modules/catalog/category/transport/http"
 	mappinghttp "github.com/dujiao-next/internal/modules/catalog/mapping/transport/http"
@@ -112,6 +113,7 @@ func registerAdminRoutes(
 	categoryhttp.RegisterAdminRoutes(authorized, adminCatalogCategoryHandler)
 
 	// 设置管理
+	backuphttp.RegisterAdminRoutes(authorized, backuphttp.NewHandler(c.BackupService))
 	settingstransport.RegisterAdminRoutes(authorized, adminSettingsHandler)
 	settingstransport.RegisterAdminSMTPRoutes(authorized, settingsbootstrap.NewSMTPHandler(c, cfg))
 	settingstransport.RegisterAdminCaptchaRoutes(authorized, settingsbootstrap.NewCaptchaHandler(c, cfg))

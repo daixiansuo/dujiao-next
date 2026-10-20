@@ -1,7 +1,6 @@
 <template>
   <div class="mx-auto w-full max-w-[1180px] px-6 pb-10 pt-2">
     <header class="mt-6 flex flex-col items-start gap-2">
-      <h1 class="text-[34px] font-extrabold">{{ t('nav.blog') }}</h1>
       <p class="text-muted-foreground">{{ t('blog.subtitle') }}</p>
     </header>
 

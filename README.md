@@ -218,6 +218,95 @@ To build an image locally:
 docker build --build-arg APP_VERSION=local -t dujiao-next:local .
 ```
 
+## PostgreSQL Backups to Cloudflare R2
+
+With `database.driver: postgres` (or `postgresql`), open the database backup tab in
+admin settings. Configure the R2 account endpoint
+`https://<account-id>.r2.cloudflarestorage.com`, bucket, access key ID, secret access
+key, and optional object prefix. Use credentials restricted to the backup bucket
+with object read, write, and delete permissions. The bucket must already exist;
+use its S3 API endpoint, rather than an R2 public download domain. SQLite databases
+are not supported by this feature.
+
+Test the connection, create a manual backup, then enable a daily schedule with an
+explicit time zone if needed. The default schedule is 03:00 in `Asia/Shanghai`,
+with 14 successful backups retained. The backup list shows export/upload status,
+archive size, and SHA-256. Downloads use signed links valid for 15 minutes. Removing
+a backup deletes its object and then its record; retention removes older successful
+backups. Run only one application instance with backup scheduling enabled against
+a given database.
+
+Backups are official `pg_dump --format=custom` archives. The process reads the same
+PostgreSQL DSN as the application, preserves its libpq SSL options, and passes its
+password through the subprocess environment. Both URL and libpq `key=value` DSNs
+are accepted. Install the PostgreSQL client tools, including `pg_dump` and `psql`
+in the same directory. Set `backup.pg_dump_path` to the dump executable (default
+`pg_dump`); an absolute path is also supported. A readiness check uses the adjacent
+`psql` with the same libpq connection options to query the actual server version
+and rejects a dump client whose major version is older than the server. Prefer a
+client matching the source server, and keep a compatible `pg_restore` available
+for recovery.
+
+The container uses the official `postgres:${POSTGRES_MAJOR}-alpine` runtime so its
+`pg_dump`, `pg_restore`, and client libraries match. `POSTGRES_MAJOR` defaults to 16;
+set it to the PostgreSQL major version used by your deployment. The inherited database initializer is disabled: starting the
+image runs the application. Both `linux/amd64` and `linux/arm64` remain supported.
+
+```bash
+docker build --build-arg APP_VERSION=local --build-arg POSTGRES_MAJOR=16 \
+  -t dujiao-next:local .
+```
+
+Export finishes on local disk before upload starts. Reserve enough space for at
+least one complete archive in `backup.temp_dir` (the system temporary directory by
+default). For large databases, mount a dedicated writable disk there rather than
+using a memory-backed temporary directory or a small container writable layer.
+`backup.timeout_seconds` bounds the entire job; its configuration default is 3600
+seconds. Normal completion, failure, and cancellation clean up temporary files.
+Uploads stream from the file with one multipart request at a time.
+
+Keep the original **`app.secret_key`** in a secure copy outside the database and R2
+bucket. It decrypts stored R2 credentials and other encrypted application data;
+restoring the database with a different key does not recover those secrets. Also
+save `config.yml` securely and back up `uploads/` separately. Database archives do
+not include configuration files, uploaded files, Redis queues, or PostgreSQL roles
+and other cluster-wide objects.
+
+### Restore into a New Database
+
+1. Download a successful `.dump` archive and compare its SHA-256 with the backup
+   record, for example with `sha256sum database-backup.dump`.
+2. Use `pg_restore` from the same client major that created the archive, or a newer
+   compatible client. Restore into the same PostgreSQL server major as the source
+   when using a matching dump client, or a supported newer server. Dumps produced
+   by newer clients are not guaranteed to restore into older server versions.
+3. Create an empty database owned by the application's database role. Configure
+   `PGHOST`, `PGPORT`, and `PGUSER` (and a password file or interactive authentication)
+   for the recovery server, then run:
+
+   ```bash
+   createdb --template=template0 dujiao_restored
+   pg_restore --exit-on-error --no-owner --no-privileges \
+     --dbname=dujiao_restored database-backup.dump
+   ```
+
+4. Stop the application before switching its DSN to `dujiao_restored`. Restore the
+   original `app.secret_key`, configuration, and uploaded files, then start the same
+   application version used for the backup and verify the data before upgrading.
+5. Check the R2 configuration and backup schedule after recovery. Keep the original
+   database intact until the restored application has been verified.
+
+For an adapter integration check against an existing PostgreSQL database, run:
+
+```bash
+BACKUP_TEST_POSTGRES_DSN='your-test-dsn' \
+BACKUP_TEST_PG_DUMP=/absolute/path/to/pg_dump \
+  go test ./internal/modules/backup/infrastructure/pgdump -run TestIntegrationPostgres -count=1
+```
+
+The test exports a temporary archive and inspects it with the adjacent `pg_restore`;
+it does not modify the source database. Keep test credentials out of shell history.
+
 ## Quick Start (Develop)
 
 Run the backend and the two frontends separately for hot reload:

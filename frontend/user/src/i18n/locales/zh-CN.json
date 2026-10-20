@@ -47,7 +47,7 @@
   "nav": {
     "home": "首页",
     "products": "商品中心",
-    "blog": "博客",
+    "blog": "教程",
     "notice": "公告",
     "about": "关于"
   },
@@ -102,7 +102,8 @@
     "rights": "保留所有权利",
     "terms": "服务条款",
     "privacy": "隐私政策",
-    "email": "邮箱",
+    "email": "Email",
+    "x": "X",
     "supportUrl": "在线客服"
   },
   "notFoundPage": {

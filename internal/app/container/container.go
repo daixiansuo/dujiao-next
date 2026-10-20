@@ -10,6 +10,7 @@ import (
 	apicredentialcontract "github.com/dujiao-next/internal/modules/apicredential/contract"
 	auditlogapp "github.com/dujiao-next/internal/modules/auditlog/application"
 	auditlogcontract "github.com/dujiao-next/internal/modules/auditlog/contract"
+	backupapp "github.com/dujiao-next/internal/modules/backup/application"
 	captchaapp "github.com/dujiao-next/internal/modules/captcha/application"
 	cardsecretapp "github.com/dujiao-next/internal/modules/cardsecret/application"
 	cardsecretgormstore "github.com/dujiao-next/internal/modules/cardsecret/infrastructure/gormstore"
@@ -85,8 +86,9 @@ import (
 
 // Container 声明应用运行期共享的依赖表面；具体构造过程按职责拆分在同包装配文件中。
 type Container struct {
-	Config      *config.Config
-	QueueClient *queue.Client
+	BackupService *backupapp.Service
+	Config        *config.Config
+	QueueClient   *queue.Client
 
 	// Repositories
 	AdminStore             admincontract.Store
