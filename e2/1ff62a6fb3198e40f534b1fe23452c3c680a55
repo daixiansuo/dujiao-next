@@ -1,0 +1,168 @@
+internal/modules/backup/infrastructure/r2/store.go
+  s_1d73d8d2864133::t_716df99d89d8f6 146-147
+  s_1d73d8d2864133::t_9814cfe3dd9ea3 99
+frontend/admin/src/utils/backupDiagnostic.test.ts
+  s_1d73d8d2864133::t_ded45569a5d006 19-27
+internal/modules/backup/application/records.go
+  s_1d73d8d2864133::t_13eef4dd181e97 4-7,9-10,14-17,21-38,45-60,67-68,72-95,100-109,113-142,146-158,163-194,196-199,201-202
+  s_1d73d8d2864133::t_9f6dca9e1f8867 1-3,8,11-13,18-20,39-41,61-63,69-71,96-98,110-112,143-145,159-161,203
+  s_1d73d8d2864133::t_3d48a848f18a66 42-44,64-66
+  s_1d73d8d2864133::t_f5e197abb618c6 195
+frontend/admin/src/api/admin.ts
+  s_1d73d8d2864133::t_911638cfc4ac15 3,392-399
+frontend/user/src/components/Footer.vue
+  s_1d73d8d2864133::t_8881855cd07989 78-85
+internal/modules/settings/application/site_normalize.go
+  s_1d73d8d2864133::t_8881855cd07989 133-134,142-143,165-170
+frontend/admin/src/api/types.ts
+  s_1d73d8d2864133::t_911638cfc4ac15 1235-1288
+frontend/user/src/i18n/locales/zh-TW.json
+  s_1d73d8d2864133::t_c1c6503f90dd3e 106
+  s_1d73d8d2864133::t_1094e7e686f8e5 50
+  s_1d73d8d2864133::t_2f57de6e7cdd2f 105
+internal/modules/settings/integrationtest/http/contact_integration_test.go
+  s_1d73d8d2864133::t_1a8d01c3884bbf 47,62,142-143,147-149
+  s_1d73d8d2864133::t_59e4a1469985f4 1-46,48-61,63-141,144-146,150-175
+internal/app/backup_service.go
+  s_1d73d8d2864133::t_4a1d5987a02a95 5
+internal/modules/backup/infrastructure/pgdump/dumper.go
+  s_1d73d8d2864133::t_fa7eb9774dd115 1-10,12-24,26-37,41-65,67-98,101-103,105-107,129-212
+  s_1d73d8d2864133::t_8a7075e2357480 11,25,38-40,66,99-100,104,108-128
+frontend/admin/src/composables/useBackupSettings.ts
+  s_1d73d8d2864133::t_911638cfc4ac15 1-3,5-52,54-109,115-137,139-152,157-158,160,162-274
+  s_1d73d8d2864133::t_567e057afb6839 4,53,110-114,138,153-156,159,161
+frontend/user/src/views/About.vue
+  s_1d73d8d2864133::t_c1c6503f90dd3e 68-74
+frontend/admin/src/layouts/AdminLayout.vue
+  s_1d73d8d2864133::t_9802f17223aeaf 2,671-685
+  s_1d73d8d2864133::t_99d196f186fe3d 58,63,112-115,749,752,771-774,875-877
+internal/modules/backup/infrastructure/pgdump/dsn.go
+  s_1d73d8d2864133::t_180a3500b0a17e 65-66
+  s_1d73d8d2864133::t_fa7eb9774dd115 1-12,14-64,67-111
+internal/shared/contactlink/contactlink.go
+  s_1d73d8d2864133::t_8881855cd07989 4-8,22-41
+internal/modules/backup/infrastructure/pgdump/dumper_test.go
+  s_1d73d8d2864133::t_ef593cc4315b14 28-45,161-232,336-354
+  s_1d73d8d2864133::t_716df99d89d8f6 21-24,92-93,121-160
+  s_1d73d8d2864133::t_9440af47bd9541 1-20,25-27,46-91,94-120,233-335,355-363
+internal/modules/backup/transport/http/handler.go
+  s_1d73d8d2864133::t_13eef4dd181e97 1-4,6-75,85-94,103-133,151
+  s_1d73d8d2864133::t_9e75ca973d2aad 81,84,138-149
+frontend/admin/src/stores/siteBrand.ts
+  s_1d73d8d2864133::t_99d196f186fe3d 1-22
+Dockerfile
+  s_1d73d8d2864133::t_180a3500b0a17e 6,8,63,75-76
+frontend/admin/src/utils/backupDiagnostic.ts
+  s_1d73d8d2864133::t_567e057afb6839 1-28
+.github/workflows/docker-build.yml
+  s_1d73d8d2864133::t_1d68c8a1eb0f32 152,166-202
+internal/app/container/backup.go
+  s_1d73d8d2864133::t_4a1d5987a02a95 4-5
+frontend/admin/src/i18n/index.ts
+  s_1d73d8d2864133::t_102c1d4e46b038 492,5148,9804
+  s_1d73d8d2864133::t_bef9f2414f648b 2806,2875-2903,2905-2934,2936-2945,2947-2959,2984-2997,7462,7531-7559,7561-7590,7592-7601,7603-7615,7640-7653,12118,12187-12215,12217-12246,12248-12257,12259-12271,12296-12309
+  s_1d73d8d2864133::t_c1c6503f90dd3e 3207,7863,12519
+  s_1d73d8d2864133::t_567e057afb6839 2904,2935,2946,2960-2983,7560,7591,7602,7616-7639,12216,12247,12258,12272-12295
+  s_1d73d8d2864133::t_1094e7e686f8e5 3065,7721,12377
+  s_1d73d8d2864133::t_8881855cd07989 3205-3206,3208,7861-7862,7864,12517-12518,12520
+  s_1d73d8d2864133::t_99d196f186fe3d 3145,3155,7801,7811,12457,12467
+frontend/admin/index.html
+  s_1d73d8d2864133::t_102c1d4e46b038 7
+internal/modules/backup/contract/ports.go
+  s_1d73d8d2864133::t_4c549d4d15be4e 1-33
+internal/modules/settings/application/site_normalize_test.go
+  s_1d73d8d2864133::t_73812f2353eba8 116-117,239-244,734-745,759-762,770-823
+internal/modules/backup/domain/backup.go
+  s_1d73d8d2864133::t_4c549d4d15be4e 1-83
+README.md
+  s_1d73d8d2864133::t_85104735e35eb9 246-248,252
+  s_1d73d8d2864133::t_180a3500b0a17e 250,253
+  s_1d73d8d2864133::t_8a7075e2357480 242-245
+internal/i18n/messages.go
+  s_1d73d8d2864133::t_73812f2353eba8 238,404-412,623,789-797,1008
+internal/modules/settings/transport/http/admin_handler.go
+  s_1d73d8d2864133::t_8881855cd07989 62,66-67
+frontend/user/src/i18n/locales/zh-CN.json
+  s_1d73d8d2864133::t_1094e7e686f8e5 50
+  s_1d73d8d2864133::t_c1c6503f90dd3e 106
+  s_1d73d8d2864133::t_2f57de6e7cdd2f 105
+frontend/admin/src/views/Login.vue
+  s_1d73d8d2864133::t_032c1467a4b78f 10,13,20-22,171,196,198-199
+  s_1d73d8d2864133::t_90c285e95f8405 200-201
+  s_1d73d8d2864133::t_ddf1c92e4927a7 195,197
+frontend/user/src/composables/useAbout.ts
+  s_1d73d8d2864133::t_c1c6503f90dd3e 60
+internal/modules/backup/application/config.go
+  s_1d73d8d2864133::t_a9d25fab9964cd 1-3,14-17,20-22,47-49,54-56,64-66,75-77,89-91,108-110,124-126,132-134,198
+  s_1d73d8d2864133::t_13eef4dd181e97 4-13,18-19,23-46,50-53,57-63,67-74,78-88,92,94-107,111-123,127-131,135-197
+  s_1d73d8d2864133::t_3d48a848f18a66 93
+internal/modules/backup/transport/http/routes.go
+  s_1d73d8d2864133::t_13eef4dd181e97 1-14
+internal/modules/backup/transport/http/handler_test.go
+  s_1d73d8d2864133::t_3d48a848f18a66 1-6,8-9,11-13,15-161
+  s_1d73d8d2864133::t_9e75ca973d2aad 7,10,14,162-185,188-252,254-271,279,283,287,293,297,302,305,309,314,316
+internal/modules/backup/application/backup.go
+  s_1d73d8d2864133::t_13eef4dd181e97 4-13,15-17,21-27,34-43,45-49,51-90,94,96-99,101-107,109-112,114-118,120-124,126-128,130-136,138-142,144-149,151-152,154-156,158-167,171-174,178,183-189,193-195,199-201,205-209,213-227,231-235,240-257,261-263,267-299,301,306-318,320
+  s_1d73d8d2864133::t_9e75ca973d2aad 108
+  s_1d73d8d2864133::t_3d48a848f18a66 28-33,44,264-266
+  s_1d73d8d2864133::t_9f6dca9e1f8867 1-3,14,18-20,91-93,168-170,175-177,179-181,190-192,196-198,202-204,210-212,228-230,236-239,258-260,321
+internal/modules/backup/application/service.go
+  s_1d73d8d2864133::t_a9d25fab9964cd 1-3,12-14,19-22,42-44,49-51,61-62,66-67,71-73,76,98,102
+  s_1d73d8d2864133::t_13eef4dd181e97 4-11,15-18,23-41,45-48,52-60,63-65,68-70,74-75,82,85,97
+frontend/admin/src/views/admin/components/SettingsBackupTab.vue
+  s_1d73d8d2864133::t_bef9f2414f648b 36
+  s_1d73d8d2864133::t_84747c21335c55 1-14,16-26,28-35,37-145,147-183,185-187,189-269,271,273-289
+  s_1d73d8d2864133::t_567e057afb6839 15,27,146,184,188,270,272
+internal/modules/backup/application/lifecycle.go
+  s_1d73d8d2864133::t_13eef4dd181e97 1-36,38-41,43-55,57-70,72-73,75-81,84-118,120-141,143-195,198-219
+internal/modules/backup/infrastructure/gormstore/store.go
+  s_1d73d8d2864133::t_13eef4dd181e97 4-9,12,16-18,21-29,33-40,44-52,56-58,62-64,68-75
+  s_1d73d8d2864133::t_a9d25fab9964cd 1-3,10-11,13-15,19-20,30-32,41-43,53-55,59-61,65-67,76-78
+internal/modules/backup/application/service_test.go
+  s_1d73d8d2864133::t_3d48a848f18a66 581
+  s_1d73d8d2864133::t_7815d0292fd7c5 26,33,38,45,52,57,62,66,71,74,77,81,87,89,96,99,103,109,112,115,119,125,127,131,136,139,142,150,155,157,164,171,174,179,181,191,196,201,203,205,210,214,219,223,225,229,235,238,241,251,259-260,262,271,273,297,301,304,309,314,317-318,322,326,330,333-335,345,350,354-356,381,387,393,396,399,403,406-407,420,427-428,430-433,437,441,445,449-452,455-456,459,462,464-467,471,474,476,478-480,490-491,494-495,504,506,515,518,525-526,529-530,533-534,539,546-547,549,552-553,560,565-566,569-570,577-578,586-587,589,591,593,596,599-600,602,604,607,610-611,642-643,646,648-651,654-655,658,660-662,670,672-673,677,682-767,772,778,782,785,788,790-793,795,797-799,801-802,806-807
+internal/modules/backup/infrastructure/r2/store_test.go
+  s_1d73d8d2864133::t_716df99d89d8f6 135
+internal/modules/backup/infrastructure/gormstore/store_test.go
+  s_1d73d8d2864133::t_3d48a848f18a66 1-86
+internal/modules/settings/transport/http/admin_handler_test.go
+  s_1d73d8d2864133::t_5cebe002bbebd0 13,20,29,102-132
+  s_1d73d8d2864133::t_4427bba5473c9f 82-101
+frontend/admin/src/views/admin/Settings.vue
+  s_1d73d8d2864133::t_84747c21335c55 27,38,93,775-778,848,1527-1530
+  s_1d73d8d2864133::t_8881855cd07989 201-202,1062-1069
+  s_1d73d8d2864133::t_567e057afb6839 849-850
+  s_1d73d8d2864133::t_99d196f186fe3d 6,30,635
+frontend/user/src/templates/vault/layout/VaultLayout.vue
+  s_1d73d8d2864133::t_8881855cd07989 117-120,215
+  s_1d73d8d2864133::t_99d196f186fe3d 131,141
+frontend/user/src/templates/vault/About.vue
+  s_1d73d8d2864133::t_c1c6503f90dd3e 43-46
+frontend/admin/src/App.vue
+  s_1d73d8d2864133::t_102c1d4e46b038 2,4-5,8-9,11-13,17
+  s_1d73d8d2864133::t_9802f17223aeaf 3,10,14-16
+frontend/user/src/i18n/locales/en-US.json
+  s_1d73d8d2864133::t_c1c6503f90dd3e 106
+  s_1d73d8d2864133::t_1094e7e686f8e5 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "e21ff62a6fb3198e40f534b1fe23452c3c680a55",
+  "prompts": {},
+  "humans": {
+    "h_68b39d2fe422d8": {
+      "author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  },
+  "sessions": {
+    "s_1d73d8d2864133": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15443-8ef8-7801-b43b-742a96245742",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
