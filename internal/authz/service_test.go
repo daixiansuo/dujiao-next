@@ -223,6 +223,66 @@ func TestBootstrapBuiltinRolesRemovesStaleImmutableWildcard(t *testing.T) {
 	}
 }
 
+func TestBootstrapBuiltinRolesRemovesRetiredAdPolicies(t *testing.T) {
+	svc := setupAuthzServiceTest(t)
+	if err := svc.GrantRolePolicy("custom_support", "/admin/orders/:id", "GET"); err != nil {
+		t.Fatalf("grant custom business policy: %v", err)
+	}
+	if err := svc.SetAdminRoles(17, []string{"custom_support", "readonly_auditor"}); err != nil {
+		t.Fatalf("assign admin roles: %v", err)
+	}
+	if _, err := svc.enforcer.AddPolicy("admin:17", "/admin/users/:id", "GET"); err != nil {
+		t.Fatalf("grant direct business policy: %v", err)
+	}
+
+	retiredPolicies := []Policy{
+		{Object: "/admin/ads/render/:slotCode", Action: "GET"},
+		{Object: "/admin/ads/impression", Action: "POST"},
+	}
+	for _, subject := range []string{"role:readonly_auditor", "role:custom_support", "admin:17"} {
+		for _, policy := range retiredPolicies {
+			if _, err := svc.enforcer.AddPolicy(subject, policy.Object, policy.Action); err != nil {
+				t.Fatalf("seed retired policy for %s: %v", subject, err)
+			}
+		}
+	}
+
+	// 重复启动并重新加载持久化策略，确认清理结果持久且幂等。
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := svc.BootstrapBuiltinRoles(); err != nil {
+			t.Fatalf("bootstrap builtin roles: %v", err)
+		}
+		if err := svc.enforcer.LoadPolicy(); err != nil {
+			t.Fatalf("reload persisted policies: %v", err)
+		}
+		for _, policy := range retiredPolicies {
+			rules, err := svc.enforcer.GetFilteredPolicy(1, policy.Object)
+			if err != nil {
+				t.Fatalf("get retired policies: %v", err)
+			}
+			if len(rules) != 0 {
+				t.Fatalf("retired policies must be removed for all subjects: %v", rules)
+			}
+		}
+		for _, policy := range []Policy{
+			{Object: "/admin/orders/42", Action: "GET"},
+			{Object: "/admin/users/42", Action: "GET"},
+			{Object: "/admin/dashboard/overview", Action: "GET"},
+			{Object: "/admin/password", Action: "PUT"},
+			{Object: "/admin/2fa/status", Action: "GET"},
+			{Object: "/admin/2fa/setup", Action: "POST"},
+			{Object: "/admin/2fa/enable", Action: "POST"},
+			{Object: "/admin/2fa/disable", Action: "POST"},
+			{Object: "/admin/2fa/recovery-codes/regenerate", Action: "POST"},
+		} {
+			allow, err := svc.EnforceAdmin(17, policy.Object, policy.Action)
+			if err != nil || !allow {
+				t.Fatalf("business and self-service permissions must remain: %s %s, allow=%v err=%v", policy.Action, policy.Object, allow, err)
+			}
+		}
+	}
+}
+
 func TestImmutableBuiltinRoleRejectsPolicyMutationAndDeletion(t *testing.T) {
 	svc := setupAuthzServiceTest(t)
 	if err := svc.BootstrapBuiltinRoles(); err != nil {

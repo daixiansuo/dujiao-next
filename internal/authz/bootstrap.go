@@ -26,9 +26,7 @@ func BuiltinRoleSeeds() []RoleSeed {
 				{Object: "/admin/compliance/status", Action: "GET"},
 				{Object: "/admin/authz/me", Action: "GET"},
 				{Object: "/admin/2fa/status", Action: "GET"},
-				{Object: "/admin/ads/render/:slotCode", Action: "GET"},
 				{Object: "/admin/password", Action: "PUT"},                       // 所有管理员均可修改自己密码
-				{Object: "/admin/ads/impression", Action: "POST"},                // 广告曝光埋点，所有管理员可触发
 				{Object: "/admin/2fa/setup", Action: "POST"},                     // 自助绑定 2FA
 				{Object: "/admin/2fa/enable", Action: "POST"},                    // 自助启用 2FA
 				{Object: "/admin/2fa/disable", Action: "POST"},                   // 自助关闭 2FA
@@ -298,6 +296,16 @@ func (s *Service) BootstrapBuiltinRoles() error {
 	}
 
 	changed := false
+	// 清理已下线广告接口的历史策略，包括自定义角色和管理员直授策略。
+	for _, object := range []string{"/admin/ads/render/:slotCode", "/admin/ads/impression"} {
+		removed, err := s.enforcer.RemoveFilteredPolicy(1, object)
+		if err != nil {
+			return fmt.Errorf("remove retired ad policy failed: %w", err)
+		}
+		if removed {
+			changed = true
+		}
+	}
 	for _, seed := range BuiltinRoleSeeds() {
 		role, err := NormalizeRole(seed.Role)
 		if err != nil {
