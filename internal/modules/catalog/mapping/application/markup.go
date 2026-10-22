@@ -72,5 +72,11 @@ func (s *Service) recalcProductPrice(product *productdomain.Product) {
 	}
 	product.PriceAmount = money.FromDecimal(minPrice.Round(2))
 	product.CostPriceAmount = money.FromDecimal(minCostPrice.Round(2))
-	_ = s.products.Update(product)
+	_ = s.products.QuickUpdate(
+		strconv.FormatUint(uint64(product.ID), 10),
+		map[string]interface{}{
+			"price_amount":      product.PriceAmount,
+			"cost_price_amount": product.CostPriceAmount,
+		},
+	)
 }

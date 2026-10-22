@@ -110,11 +110,14 @@ func (s *Service) Delete(id uint) error {
 		localProduct, err := s.products.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
 		if err == nil && localProduct != nil {
 			localProduct.IsMapped = false
+			fields := map[string]interface{}{"is_mapped": localProduct.IsMapped}
 			if localProduct.FulfillmentType == constants.FulfillmentTypeUpstream {
 				localProduct.FulfillmentType = constants.FulfillmentTypeManual
 				localProduct.IsActive = false // 下架，防止用户下单后无法交付
+				fields["fulfillment_type"] = localProduct.FulfillmentType
+				fields["is_active"] = localProduct.IsActive
 			}
-			_ = s.products.Update(localProduct)
+			_ = s.products.QuickUpdate(strconv.FormatUint(uint64(localProduct.ID), 10), fields)
 		}
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/dujiao-next/internal/modules/catalog/product/manualform"
 	"github.com/dujiao-next/internal/platform/http/ginutil"
 	"github.com/dujiao-next/internal/platform/http/response"
+	"github.com/dujiao-next/internal/shared/jsonslice"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -657,6 +658,12 @@ type BatchProductStockDisplayRequest struct {
 	StockDisplayMode string `json:"stock_display_mode" binding:"required"`
 }
 
+// BatchProductImagesRequest 商品批量图片更新请求
+type BatchProductImagesRequest struct {
+	IDs    []uint   `json:"ids" binding:"required,min=1,dive,gt=0"`
+	Images []string `json:"images" binding:"required,min=1,dive,required"`
+}
+
 type batchProductFailureItem struct {
 	ID        uint   `json:"id"`
 	ErrorCode string `json:"error_code"`
@@ -726,6 +733,22 @@ func (h *AdminProductHandler) BatchUpdateProductStockDisplay(c *gin.Context) {
 		return
 	}
 	h.batchQuickUpdate(c, req.IDs, map[string]interface{}{"stock_display_mode": mode})
+}
+
+// BatchUpdateProductImages 批量修改商品图片
+func (h *AdminProductHandler) BatchUpdateProductImages(c *gin.Context) {
+	var req BatchProductImagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginutil.RespondBindError(c, err)
+		return
+	}
+	for _, image := range req.Images {
+		if strings.TrimSpace(image) == "" {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+			return
+		}
+	}
+	h.batchQuickUpdate(c, req.IDs, map[string]interface{}{"images": jsonslice.Strings(req.Images)})
 }
 
 // BatchDeleteProducts 批量删除商品

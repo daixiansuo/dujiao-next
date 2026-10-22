@@ -87,7 +87,10 @@ func (s *Service) SyncProduct(mappingID uint) error {
 			needsProductUpdate = true
 		}
 		if needsProductUpdate {
-			_ = s.products.Update(localProduct)
+			_ = s.products.QuickUpdate(
+				strconv.FormatUint(uint64(localProduct.ID), 10),
+				map[string]interface{}{"manual_form_schema_json": localProduct.ManualFormSchemaJSON},
+			)
 		}
 	}
 
@@ -275,7 +278,10 @@ func (s *Service) markUpstreamUnavailable(mapping *mappingdomain.Mapping, status
 	localProduct, err := s.products.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
 	if err == nil && localProduct != nil && localProduct.IsActive {
 		localProduct.IsActive = false
-		_ = s.products.Update(localProduct)
+		_ = s.products.QuickUpdate(
+			strconv.FormatUint(uint64(localProduct.ID), 10),
+			map[string]interface{}{"is_active": localProduct.IsActive},
+		)
 	}
 
 	// SKU 映射 + 本地 SKU 下架
@@ -643,7 +649,10 @@ func (s *Service) syncProductFromData(mapping *mappingdomain.Mapping, conn *site
 
 	if upProduct.ManualFormSchema != nil {
 		localProduct.ManualFormSchemaJSON = upProduct.ManualFormSchema
-		_ = s.products.Update(localProduct)
+		_ = s.products.QuickUpdate(
+			strconv.FormatUint(uint64(localProduct.ID), 10),
+			map[string]interface{}{"manual_form_schema_json": localProduct.ManualFormSchemaJSON},
+		)
 	}
 
 	// ── 2. 同步 SKU ──

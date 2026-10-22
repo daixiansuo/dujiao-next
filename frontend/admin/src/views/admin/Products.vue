@@ -19,6 +19,8 @@ import ListPagination from '@/components/ListPagination.vue'
 import type { ListFetchOptions } from '@/composables/useListRefresh'
 import { confirmAction } from '@/utils/confirm'
 import ProductEditModal from './components/ProductEditModal.vue'
+import MediaPicker from '@/components/admin/MediaPicker.vue'
+import { Dialog, DialogScrollContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { buildAdminCategoryPath, createAdminCategoryMap, createAdminCategoryChildCountMap, flattenAdminCategories, isAdminProductCategorySelectable } from '@/utils/category'
 import { formatWholesaleTierScopeLabel, wholesaleTierScopeValue } from '@/utils/wholesalePricing'
 
@@ -56,6 +58,56 @@ const batchOperating = ref(false)
 const batchCategoryId = ref('')
 const batchStockDisplayMode = ref('')
 const stockDisplayModes = ['exact', 'status', 'range', 'hidden']
+
+interface BatchImageFailure {
+  id: number
+  message: string
+}
+
+const showBatchImages = ref(false)
+const batchImageIds = ref<number[]>([])
+const batchImages = ref<string[]>([])
+const batchImageFailures = ref<BatchImageFailure[]>([])
+const batchImageResult = ref<{ success: number; total: number } | null>(null)
+const batchImagePicker = ref<InstanceType<typeof MediaPicker> | null>(null)
+const batchImagesBusy = computed(() => batchOperating.value || Boolean(batchImagePicker.value?.uploading))
+
+const openBatchImages = () => {
+  if (batchOperating.value || !selectedIds.value.size) return
+  batchImageIds.value = Array.from(selectedIds.value)
+  batchImages.value = []
+  batchImageFailures.value = []
+  batchImageResult.value = null
+  showBatchImages.value = true
+}
+
+const updateBatchImagesOpen = (open: boolean) => {
+  if (!batchImagesBusy.value) showBatchImages.value = open
+}
+
+const handleBatchImages = async () => {
+  if (batchImagesBusy.value || !batchImageIds.value.length || !batchImages.value.length) return
+  const ids = [...batchImageIds.value]
+  batchOperating.value = true
+  try {
+    const res = await adminAPI.batchUpdateProductImages(ids, [...batchImages.value])
+    const data = res.data.data as { total: number; success_count: number; failed_items: BatchImageFailure[] }
+    batchImageResult.value = { success: data.success_count, total: data.total }
+    batchImageFailures.value = data.failed_items
+    if (data.failed_items.length) {
+      batchImageIds.value = data.failed_items.map(item => item.id)
+    } else {
+      notifySuccess(t('admin.products.batch.imagesResult', batchImageResult.value))
+      showBatchImages.value = false
+    }
+    if (data.success_count > 0) await fetchProducts({ preserveRows: true })
+  } catch (err: any) {
+    if (!isNotifiedError(err)) notifyError(t('admin.products.errors.updateFailed', { message: err?.message || '' }))
+  } finally {
+    batchOperating.value = false
+  }
+}
+
 
 const allSelected = computed(() => products.value.length > 0 && products.value.every((p) => selectedIds.value.has(p.id)))
 
@@ -604,6 +656,7 @@ watch(
           </Select>
           <Button size="sm" variant="outline" :disabled="batchOperating || !batchStockDisplayMode" @click="handleBatchStockDisplay">{{ t('admin.products.batch.applyStockDisplay') }}</Button>
         </div>
+        <Button size="sm" variant="outline" :disabled="batchOperating" @click="openBatchImages">{{ t('admin.products.batch.images') }}</Button>
         <Button size="sm" variant="destructive" :disabled="batchOperating" @click="handleBatchDelete">{{ t('admin.products.batch.delete') }}</Button>
       </div>
       <button class="ml-auto text-xs text-muted-foreground hover:text-foreground" @click="selectedIds = new Set()">{{ t('admin.products.batch.clearSelection') }}</button>
@@ -783,6 +836,31 @@ watch(
         @change-page-size="changePageSize"
       />
     </div>
+
+    <Dialog :open="showBatchImages" @update:open="updateBatchImagesOpen">
+      <DialogScrollContent class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{{ t('admin.products.batch.images') }}</DialogTitle>
+          <DialogDescription>{{ t('admin.products.batch.imagesDescription') }}</DialogDescription>
+        </DialogHeader>
+        <p class="text-sm text-muted-foreground">{{ t('admin.products.batch.selected', { count: batchImageIds.length }) }}</p>
+        <div :inert="batchOperating">
+          <MediaPicker v-if="showBatchImages" ref="batchImagePicker" v-model="batchImages" :multiple="true" scene="product" />
+        </div>
+        <div v-if="batchImageFailures.length" role="status" class="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p class="font-medium">{{ t('admin.products.batch.imagesFailedResult', batchImageResult || {}) }}</p>
+          <ul class="max-h-40 space-y-1 overflow-y-auto text-muted-foreground">
+            <li v-for="item in batchImageFailures" :key="item.id">#{{ item.id }} · {{ item.message }}</li>
+          </ul>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" :disabled="batchImagesBusy" @click="updateBatchImagesOpen(false)">{{ t('admin.common.cancel') }}</Button>
+          <Button :disabled="batchImagesBusy || !batchImages.length || !batchImageIds.length" @click="handleBatchImages">
+            {{ t(batchImageFailures.length ? 'admin.products.batch.retryImages' : 'admin.common.save') }}
+          </Button>
+        </DialogFooter>
+      </DialogScrollContent>
+    </Dialog>
 
     <ProductEditModal
       v-model="showModal"

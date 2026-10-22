@@ -1,9 +1,13 @@
 package application
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/dujiao-next/internal/constants"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
+	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
+	"github.com/dujiao-next/internal/shared/money"
 
 	"github.com/shopspring/decimal"
 )
@@ -109,5 +113,86 @@ func TestCalculateFixedAmountPrice(t *testing.T) {
 		if !got.Equal(decimal.NewFromInt(14)) {
 			t.Fatalf("mode %q: got %s, want 14", mode, got)
 		}
+	}
+}
+
+type productPriceUpdateRecorder struct {
+	mappingcontract.ProductRepository
+	id     string
+	fields map[string]interface{}
+	err    error
+}
+
+func (r *productPriceUpdateRecorder) QuickUpdate(id string, fields map[string]interface{}) error {
+	r.id, r.fields = id, fields
+	return r.err
+}
+
+type productPriceSKUReader struct {
+	mappingcontract.SKURepository
+	skus       []productdomain.ProductSKU
+	err        error
+	productID  uint
+	onlyActive bool
+}
+
+func (r *productPriceSKUReader) ListByProduct(productID uint, onlyActive bool) ([]productdomain.ProductSKU, error) {
+	r.productID, r.onlyActive = productID, onlyActive
+	return r.skus, r.err
+}
+
+func TestRecalcProductPriceUpdatesOnlyIndependentMinimumPrices(t *testing.T) {
+	amount := func(value string) money.Amount {
+		return money.FromDecimal(decimal.RequireFromString(value))
+	}
+	skus := []productdomain.ProductSKU{
+		{PriceAmount: amount("12.346"), CostPriceAmount: amount("9.871")},
+		{PriceAmount: amount("10.124"), CostPriceAmount: amount("11.286")},
+	}
+	writeErr := errors.New("product update failed")
+	for _, tc := range []struct {
+		name       string
+		skus       []productdomain.ProductSKU
+		listErr    error
+		updateErr  error
+		wantUpdate bool
+		wantPrice  string
+		wantCost   string
+	}{
+		{name: "independent minima rounded", skus: skus, wantUpdate: true, wantPrice: "10.12", wantCost: "9.87"},
+		{name: "zero prices", skus: []productdomain.ProductSKU{{PriceAmount: amount("0"), CostPriceAmount: amount("0")}}, wantUpdate: true, wantPrice: "0.00", wantCost: "0.00"},
+		{name: "empty SKUs", wantPrice: "100.00", wantCost: "90.00"},
+		{name: "SKU query failure", skus: skus, listErr: errors.New("SKU query failed"), wantPrice: "100.00", wantCost: "90.00"},
+		{name: "update failure retains memory changes", skus: skus, updateErr: writeErr, wantUpdate: true, wantPrice: "10.12", wantCost: "9.87"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			products := &productPriceUpdateRecorder{err: tc.updateErr}
+			skuReader := &productPriceSKUReader{skus: tc.skus, err: tc.listErr}
+			svc := &Service{products: products, skus: skuReader}
+			product := &productdomain.Product{ID: 42, PriceAmount: amount("100"), CostPriceAmount: amount("90")}
+
+			svc.recalcProductPrice(product)
+
+			if skuReader.productID != product.ID || !skuReader.onlyActive {
+				t.Fatalf("must query only active SKUs for product %d, got id=%d active=%v", product.ID, skuReader.productID, skuReader.onlyActive)
+			}
+			if product.PriceAmount.String() != tc.wantPrice || product.CostPriceAmount.String() != tc.wantCost {
+				t.Errorf("in-memory prices = %s/%s, want %s/%s", product.PriceAmount, product.CostPriceAmount, tc.wantPrice, tc.wantCost)
+			}
+			if !tc.wantUpdate {
+				if products.id != "" || products.fields != nil {
+					t.Errorf("unexpected update without usable SKUs: id=%q fields=%+v", products.id, products.fields)
+				}
+				return
+			}
+			if products.id != "42" || len(products.fields) != 2 {
+				t.Fatalf("unexpected product update: id=%q fields=%+v", products.id, products.fields)
+			}
+			price, priceOK := products.fields["price_amount"].(money.Amount)
+			cost, costOK := products.fields["cost_price_amount"].(money.Amount)
+			if !priceOK || !costOK || price.String() != tc.wantPrice || cost.String() != tc.wantCost {
+				t.Errorf("persisted prices = %+v, want %s/%s", products.fields, tc.wantPrice, tc.wantCost)
+			}
+		})
 	}
 }

@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -29,6 +32,7 @@ import (
 	siteconnectionapp "github.com/dujiao-next/internal/modules/siteconnection/application"
 	siteconnectiongormstore "github.com/dujiao-next/internal/modules/siteconnection/infrastructure/gormstore"
 	"github.com/dujiao-next/internal/shared/jsonmap"
+	"github.com/dujiao-next/internal/shared/jsonslice"
 	"github.com/dujiao-next/internal/shared/money"
 	"github.com/dujiao-next/internal/upstream"
 	"github.com/glebarez/sqlite"
@@ -938,6 +942,309 @@ func TestImportUpstreamProductPrefersUpstreamSlug(t *testing.T) {
 		}
 		if tc.want == "" && !strings.HasPrefix(product.Slug, "upstream-") {
 			t.Fatalf("upstream %d: expected fallback slug, got %q", tc.upstreamID, product.Slug)
+		}
+	}
+}
+
+// concurrentProductEditStore 固定复现：先读取旧快照，再提交管理员修改，最后让映射操作继续保存。
+// 管理员更新在 GetByID 完成后执行，兼容 SQLite 单连接，无需 goroutine 或 sleep。
+type concurrentProductEditStore struct {
+	ProductStore
+	snapshot     *productdomain.Product
+	quickUpdates []map[string]interface{}
+}
+
+func (r *concurrentProductEditStore) GetByID(id string) (*productdomain.Product, error) {
+	product, err := r.ProductStore.GetByID(id)
+	if err != nil || product == nil || r.snapshot != nil {
+		return product, err
+	}
+	r.snapshot = product
+	if err := r.ProductStore.QuickUpdate(id, concurrentLocalProductFields()); err != nil {
+		return nil, err
+	}
+	return product, nil
+}
+
+func (r *concurrentProductEditStore) QuickUpdate(id string, fields map[string]interface{}) error {
+	r.quickUpdates = append(r.quickUpdates, fields)
+	return r.ProductStore.QuickUpdate(id, fields)
+}
+
+func concurrentLocalProductFields() map[string]interface{} {
+	return map[string]interface{}{
+		"images":             jsonslice.Strings{"/uploads/admin-new.png"},
+		"title_json":         jsonmap.JSON{"zh-CN": "admin title"},
+		"description_json":   jsonmap.JSON{"zh-CN": "admin description"},
+		"content_json":       jsonmap.JSON{"zh-CN": "admin content"},
+		"instructions_json":  jsonmap.JSON{"zh-CN": "admin instructions"},
+		"tags":               jsonslice.Strings{"admin tag"},
+		"sort_order":         37,
+		"manual_stock_total": 23,
+	}
+}
+
+func setupConcurrentProductEdit(t *testing.T, handler http.HandlerFunc) (*mappingapp.Service, *gorm.DB, *mappingdomain.Mapping, *concurrentProductEditStore) {
+	t.Helper()
+	_, db, mapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "mapping.db"), handler)
+	t.Cleanup(cleanup)
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = pool.Close() })
+	if err := db.Model(&productdomain.Product{}).Where("id = ?", mapping.LocalProductID).Updates(map[string]interface{}{
+		"images": jsonslice.Strings{"/uploads/old.png"}, "description_json": jsonmap.JSON{"zh-CN": "old description"},
+		"manual_form_schema_json": jsonmap.JSON{"local": "form"}, "cost_price_amount": "4.00",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	productRepo := &concurrentProductEditStore{ProductStore: productgormstore.NewProductStore(db)}
+	connService := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
+	svc, err := newTestMappingService(
+		mappinggormstore.NewMappingStore(db), mappinggormstore.NewSKUMappingStore(db), productRepo,
+		productgormstore.NewSKUStore(db), categorygormstore.NewCategoryStore(db), connService, noopLocalMediaRecorder{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc, db, mapping, productRepo
+}
+
+func assertConcurrentProductEdit(t *testing.T, db *gorm.DB, productID uint, repo *concurrentProductEditStore, wantFields ...string) *productdomain.Product {
+	t.Helper()
+	if repo.snapshot == nil || !reflect.DeepEqual(repo.snapshot.Images, jsonslice.Strings{"/uploads/old.png"}) || repo.snapshot.DescriptionJSON["zh-CN"] != "old description" {
+		t.Fatalf("expected mapping operation to retain the old product snapshot, got %+v", repo.snapshot)
+	}
+	var product productdomain.Product
+	if err := db.First(&product, productID).Error; err != nil {
+		t.Fatal(err)
+	}
+	gotLocal := map[string]interface{}{
+		"images": product.Images, "title_json": product.TitleJSON, "description_json": product.DescriptionJSON,
+		"content_json": product.ContentJSON, "instructions_json": product.InstructionsJSON, "tags": product.Tags,
+		"sort_order": product.SortOrder, "manual_stock_total": product.ManualStockTotal,
+	}
+	if !reflect.DeepEqual(gotLocal, concurrentLocalProductFields()) {
+		t.Errorf("concurrent local edits overwritten: got %+v, want %+v", gotLocal, concurrentLocalProductFields())
+	}
+	var gotFields []string
+	for _, fields := range repo.quickUpdates {
+		for field := range fields {
+			gotFields = append(gotFields, field)
+		}
+	}
+	slices.Sort(gotFields)
+	slices.Sort(wantFields)
+	if !reflect.DeepEqual(gotFields, wantFields) {
+		t.Errorf("mapping wrote fields %v, want %v", gotFields, wantFields)
+	}
+	return &product
+}
+
+func TestSyncPreservesConcurrentLocalProductEdits(t *testing.T) {
+	for _, scheduled := range []bool{false, true} {
+		for _, autoPrice := range []bool{false, true} {
+			for _, schema := range []struct {
+				name string
+				form jsonmap.JSON
+			}{
+				{"omitted", nil}, {"empty", jsonmap.JSON{}}, {"updated", jsonmap.JSON{"upstream": "form"}},
+			} {
+				t.Run(strconv.FormatBool(scheduled)+"/auto_price="+strconv.FormatBool(autoPrice)+"/form="+schema.name, func(t *testing.T) {
+					source := upstream.UpstreamProduct{
+						ID: 101, IsActive: true, FulfillmentType: constants.FulfillmentTypeAuto, ManualFormSchema: schema.form,
+						SKUs: []upstream.UpstreamSKU{{ID: 201, SKUCode: "SKU-A", PriceAmount: "5.00", IsActive: true, StockQuantity: 20}},
+					}
+					svc, db, mapping, repo := setupConcurrentProductEdit(t, func(w http.ResponseWriter, r *http.Request) {
+						if scheduled {
+							listProductsHandler([]upstream.UpstreamProduct{source}, true)(w, r)
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "product": source})
+					})
+					if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]interface{}{
+						"auto_sync_price": autoPrice, "exchange_rate": 2, "price_markup_percent": 40,
+					}).Error; err != nil {
+						t.Fatal(err)
+					}
+					var err error
+					if scheduled {
+						err = svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200)
+					} else {
+						err = svc.SyncProduct(mapping.ID)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					var wantFields []string
+					wantForm := jsonmap.JSON{"local": "form"}
+					if schema.form != nil {
+						wantFields = append(wantFields, "manual_form_schema_json")
+						wantForm = schema.form
+					}
+					wantPrice, wantCost := "10.00", "4.00"
+					if autoPrice {
+						wantFields = append(wantFields, "price_amount", "cost_price_amount")
+						wantPrice, wantCost = "14.00", "10.00"
+					}
+					product := assertConcurrentProductEdit(t, db, mapping.LocalProductID, repo, wantFields...)
+					if !reflect.DeepEqual(product.ManualFormSchemaJSON, wantForm) || !reflect.DeepEqual(repo.snapshot.ManualFormSchemaJSON, wantForm) {
+						t.Errorf("form not synchronized in storage and memory: product=%v snapshot=%v want=%v", product.ManualFormSchemaJSON, repo.snapshot.ManualFormSchemaJSON, wantForm)
+					}
+					if product.PriceAmount.String() != wantPrice || product.CostPriceAmount.String() != wantCost || !product.IsActive || !product.IsMapped {
+						t.Errorf("unexpected synchronized product: %+v", product)
+					}
+					if repo.snapshot.PriceAmount.String() != wantPrice || repo.snapshot.CostPriceAmount.String() != wantCost {
+						t.Errorf("prices not updated in memory: %+v", repo.snapshot)
+					}
+					var gotMapping mappingdomain.Mapping
+					if err := db.First(&gotMapping, mapping.ID).Error; err != nil {
+						t.Fatal(err)
+					}
+					if gotMapping.UpstreamStatus != mappingdomain.UpstreamStatusActive || gotMapping.UpstreamFulfillmentType != constants.FulfillmentTypeAuto || gotMapping.LastSyncedAt == nil {
+						t.Errorf("mapping not synchronized: %+v", gotMapping)
+					}
+					var skuMapping mappingdomain.SKUMapping
+					if err := db.Where("product_mapping_id = ?", mapping.ID).First(&skuMapping).Error; err != nil {
+						t.Fatal(err)
+					}
+					if skuMapping.UpstreamPrice.String() != "5.00" || skuMapping.UpstreamStock != 20 || !skuMapping.UpstreamIsActive || skuMapping.StockSyncedAt == nil {
+						t.Errorf("SKU mapping not synchronized: %+v", skuMapping)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestSyncUnavailablePreservesConcurrentLocalProductEdits(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		for _, active := range []bool{false, true} {
+			t.Run("deleted="+strconv.FormatBool(deleted)+"/active="+strconv.FormatBool(active), func(t *testing.T) {
+				svc, db, mapping, repo := setupConcurrentProductEdit(t, func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if deleted {
+						w.WriteHeader(http.StatusNotFound)
+						_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error_code": "product_deleted"})
+						return
+					}
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "product": upstream.UpstreamProduct{ID: 101, IsActive: false}})
+				})
+				if err := db.Model(&productdomain.Product{}).Where("id = ?", mapping.LocalProductID).Update("is_active", active).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := svc.SyncProduct(mapping.ID); err != nil {
+					t.Fatal(err)
+				}
+				var wantFields []string
+				if active {
+					wantFields = append(wantFields, "is_active")
+				}
+				product := assertConcurrentProductEdit(t, db, mapping.LocalProductID, repo, wantFields...)
+				if product.IsActive || repo.snapshot.IsActive || !product.IsMapped || product.FulfillmentType != constants.FulfillmentTypeUpstream || product.PriceAmount.String() != "10.00" || product.ManualFormSchemaJSON["local"] != "form" {
+					t.Errorf("unexpected unavailable product: %+v", product)
+				}
+				var gotMapping mappingdomain.Mapping
+				if err := db.First(&gotMapping, mapping.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				wantStatus := mappingdomain.UpstreamStatusInactive
+				if deleted {
+					wantStatus = mappingdomain.UpstreamStatusDeleted
+				}
+				if gotMapping.UpstreamStatus != wantStatus || gotMapping.IsActive == deleted || gotMapping.LastSyncedAt == nil {
+					t.Errorf("unexpected unavailable mapping: %+v", gotMapping)
+				}
+				var skuMapping mappingdomain.SKUMapping
+				if err := db.Where("product_mapping_id = ?", mapping.ID).First(&skuMapping).Error; err != nil {
+					t.Fatal(err)
+				}
+				var sku productdomain.ProductSKU
+				if err := db.First(&sku, skuMapping.LocalSKUID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if skuMapping.UpstreamIsActive || skuMapping.UpstreamStock != 0 || skuMapping.StockSyncedAt == nil || sku.IsActive {
+					t.Errorf("SKU not deactivated: mapping=%+v SKU=%+v", skuMapping, sku)
+				}
+			})
+		}
+	}
+}
+
+func TestReapplyMarkupPreservesConcurrentLocalProductEdits(t *testing.T) {
+	for _, sourcePrice := range []string{"5.00", "0.00"} {
+		t.Run(sourcePrice, func(t *testing.T) {
+			svc, db, mapping, repo := setupConcurrentProductEdit(t, func(w http.ResponseWriter, r *http.Request) {
+				t.Error("markup reapply must not call upstream")
+				http.Error(w, "unexpected upstream request", http.StatusInternalServerError)
+			})
+			if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]interface{}{
+				"exchange_rate": 2, "price_markup_percent": 40,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&mappingdomain.SKUMapping{}).Where("product_mapping_id = ?", mapping.ID).Update("upstream_price", sourcePrice).Error; err != nil {
+				t.Fatal(err)
+			}
+			updated, err := svc.ReapplyMarkup(mapping.ConnectionID)
+			if err != nil || updated != 1 {
+				t.Fatalf("ReapplyMarkup = (%d, %v), want (1, nil)", updated, err)
+			}
+			product := assertConcurrentProductEdit(t, db, mapping.LocalProductID, repo, "price_amount", "cost_price_amount")
+			wantPrice, wantCost := "14.00", "10.00"
+			if sourcePrice == "0.00" {
+				wantPrice, wantCost = "0.00", "0.00"
+			}
+			if product.PriceAmount.String() != wantPrice || product.CostPriceAmount.String() != wantCost || repo.snapshot.PriceAmount.String() != wantPrice || repo.snapshot.CostPriceAmount.String() != wantCost {
+				t.Errorf("prices not reapplied in storage and memory: product=%+v snapshot=%+v", product, repo.snapshot)
+			}
+			if !product.IsActive || !product.IsMapped || product.FulfillmentType != constants.FulfillmentTypeUpstream || product.ManualFormSchemaJSON["local"] != "form" {
+				t.Errorf("markup reapply changed unrelated fields: %+v", product)
+			}
+		})
+	}
+}
+
+func TestDeleteMappingPreservesConcurrentLocalProductEdits(t *testing.T) {
+	for _, fulfillment := range []string{constants.FulfillmentTypeUpstream, constants.FulfillmentTypeManual, constants.FulfillmentTypeAuto} {
+		for _, active := range []bool{false, true} {
+			t.Run(fulfillment+"/active="+strconv.FormatBool(active), func(t *testing.T) {
+				svc, db, mapping, repo := setupConcurrentProductEdit(t, http.NotFound)
+				if err := db.Model(&productdomain.Product{}).Where("id = ?", mapping.LocalProductID).Updates(map[string]interface{}{
+					"fulfillment_type": fulfillment, "is_active": active,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := svc.Delete(mapping.ID); err != nil {
+					t.Fatal(err)
+				}
+				wantFields := []string{"is_mapped"}
+				wantFulfillment, wantActive := fulfillment, active
+				if fulfillment == constants.FulfillmentTypeUpstream {
+					wantFields = append(wantFields, "fulfillment_type", "is_active")
+					wantFulfillment, wantActive = constants.FulfillmentTypeManual, false
+				}
+				product := assertConcurrentProductEdit(t, db, mapping.LocalProductID, repo, wantFields...)
+				if product.IsMapped || repo.snapshot.IsMapped || product.FulfillmentType != wantFulfillment || repo.snapshot.FulfillmentType != wantFulfillment || product.IsActive != wantActive || repo.snapshot.IsActive != wantActive {
+					t.Errorf("unexpected detached product: product=%+v snapshot=%+v", product, repo.snapshot)
+				}
+				if product.PriceAmount.String() != "10.00" || product.CostPriceAmount.String() != "4.00" || product.ManualFormSchemaJSON["local"] != "form" {
+					t.Errorf("mapping deletion changed unrelated fields: %+v", product)
+				}
+				if got, err := svc.GetByID(mapping.ID); err != nil || got != nil {
+					t.Errorf("mapping not deleted: mapping=%+v error=%v", got, err)
+				}
+				if got, err := svc.GetSKUMappings(mapping.ID); err != nil || len(got) != 0 {
+					t.Errorf("SKU mappings not deleted: mappings=%+v error=%v", got, err)
+				}
+				var skuCount int64
+				if err := db.Model(&productdomain.ProductSKU{}).Where("product_id = ? AND deleted_at IS NULL", mapping.LocalProductID).Count(&skuCount).Error; err != nil || skuCount != 1 {
+					t.Errorf("local SKU not preserved: count=%d error=%v", skuCount, err)
+				}
+			})
 		}
 	}
 }

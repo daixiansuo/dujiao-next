@@ -109,6 +109,7 @@ function isSelected(path: string) {
 }
 
 function confirmSelection() {
+  if (uploading.value) return
   const paths = Array.from(selected.value)
   if (props.multiple) {
     emit('update:modelValue', paths)
@@ -135,6 +136,7 @@ function handleDialogDrop(e: DragEvent) {
 }
 
 async function handleDialogUpload(e: Event) {
+  if (uploading.value) return
   const files = (e.target as HTMLInputElement).files
   if (!files || files.length === 0) return
   const fileList = filterFilesByUploadSize(Array.from(files))
@@ -204,6 +206,7 @@ async function handleDirectUpload(e: Event) {
 }
 
 async function doDirectUpload(files: File[]) {
+  if (uploading.value) return
   const fileList = filterFilesByUploadSize(files)
   if (fileList.length === 0) {
     if (fileInput.value) fileInput.value.value = ''
@@ -273,7 +276,7 @@ function changePage(page: number) {
   fetchMedia(page)
 }
 
-defineExpose({ openPicker })
+defineExpose({ openPicker, uploading })
 </script>
 
 <template>
@@ -375,7 +378,7 @@ defineExpose({ openPicker })
   </div>
 
   <!-- ═══ Picker Dialog ═══ -->
-  <Dialog v-model:open="open">
+  <Dialog :open="open" @update:open="(value) => { if (!uploading) open = value }">
     <DialogScrollContent class="w-[calc(100vw-1rem)] max-w-5xl p-0" @interact-outside="(e: Event) => e.preventDefault()">
       <div class="px-6 pt-6">
         <DialogHeader>
@@ -483,8 +486,8 @@ defineExpose({ openPicker })
           <template v-if="selected.size > 0">{{ t('admin.mediaPicker.selected', { count: selected.size }) }}</template>
         </span>
         <div class="flex gap-2">
-          <Button variant="outline" size="sm" @click="open = false">{{ t('admin.mediaPicker.cancel') }}</Button>
-          <Button size="sm" :disabled="selected.size === 0" @click="confirmSelection">{{ t('admin.mediaPicker.confirm') }}</Button>
+          <Button variant="outline" size="sm" :disabled="uploading" @click="open = false">{{ t('admin.mediaPicker.cancel') }}</Button>
+          <Button size="sm" :disabled="uploading || selected.size === 0" @click="confirmSelection">{{ t('admin.mediaPicker.confirm') }}</Button>
         </div>
       </div>
     </DialogScrollContent>
