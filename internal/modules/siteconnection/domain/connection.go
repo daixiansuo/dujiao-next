@@ -3,6 +3,8 @@ package domain
 import (
 	"time"
 
+	"github.com/dujiao-next/internal/shared/money"
+
 	"github.com/shopspring/decimal"
 )
 
@@ -20,10 +22,12 @@ type Connection struct {
 	LastPingOK         bool            `gorm:"not null;default:false" json:"last_ping_ok"`
 	RetryMax           int             `gorm:"not null;default:5" json:"retry_max"`
 	RetryIntervals     string          `gorm:"type:varchar(200);not null;default:'[30,60,300]'" json:"retry_intervals"`
-	ExchangeRate       decimal.Decimal `gorm:"type:decimal(16,6);not null;default:1" json:"exchange_rate"`          // 汇率，上游价格 × 汇率 = 本地价格，默认 1
-	PriceMarkupPercent decimal.Decimal `gorm:"type:decimal(10,4);not null;default:0" json:"price_markup_percent"`   // 加价百分比，如 100 = +100%（翻倍）
-	PriceRoundingMode  string          `gorm:"type:varchar(20);not null;default:'none'" json:"price_rounding_mode"` // none / ceil_int / ceil_tenth
-	AutoSyncPrice      bool            `gorm:"not null;default:false" json:"auto_sync_price"`                       // 同步时自动更新本地价格
+	ExchangeRate       decimal.Decimal `gorm:"type:decimal(16,6);not null;default:1" json:"exchange_rate"`           // 汇率，上游价格 × 汇率 = 本地价格，默认 1
+	PriceMarkupMode    string          `gorm:"type:varchar(20);not null;default:'percent'" json:"price_markup_mode"` // percent / fixed_amount
+	PriceMarkupAmount  money.Amount    `gorm:"type:decimal(20,2);not null;default:0" json:"price_markup_amount"`     // 本地币种，每件固定加价
+	PriceMarkupPercent decimal.Decimal `gorm:"type:decimal(10,4);not null;default:0" json:"price_markup_percent"`    // 加价百分比，如 100 = +100%（翻倍）
+	PriceRoundingMode  string          `gorm:"type:varchar(20);not null;default:'none'" json:"price_rounding_mode"`  // none / ceil_int / ceil_tenth
+	AutoSyncPrice      bool            `gorm:"not null;default:false" json:"auto_sync_price"`                        // 同步时自动更新本地价格
 	CreatedAt          time.Time       `gorm:"index" json:"created_at"`
 	UpdatedAt          time.Time       `gorm:"index" json:"updated_at"`
 	DeletedAt          *time.Time      `gorm:"index" json:"-"`

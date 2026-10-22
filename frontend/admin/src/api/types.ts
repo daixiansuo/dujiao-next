@@ -571,6 +571,8 @@ export interface AdminSiteConnection {
   last_ping_at?: string
   last_ping_status?: string
   exchange_rate?: number
+  price_markup_mode?: 'percent' | 'fixed_amount'
+  price_markup_amount?: string
   price_markup_percent?: number
   price_rounding_mode?: string
   auto_sync_price?: boolean

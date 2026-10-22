@@ -33,7 +33,7 @@ func (s *Service) ReapplyMarkup(connectionID uint) (int, error) {
 		}
 
 		for _, sm := range skuMappings {
-			newLocalPrice := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
+			newLocalPrice := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
 			localSKU, err := s.skus.GetByID(sm.LocalSKUID)
 			if err != nil || localSKU == nil {
 				continue

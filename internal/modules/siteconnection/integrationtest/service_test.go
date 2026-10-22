@@ -1,6 +1,9 @@
 package siteconnection_test
 
 import (
+	"encoding/json"
+	"errors"
+	"github.com/dujiao-next/internal/shared/money"
 	"strings"
 	"testing"
 
@@ -157,4 +160,95 @@ func (r *siteConnectionRepoStub) ListActive() ([]siteconnectiondomain.Connection
 		return nil, nil
 	}
 	return []siteconnectiondomain.Connection{*r.conn}, nil
+}
+
+func TestConnectionMarkupModeUpdates(t *testing.T) {
+	percent := constants.ConnectionPriceMarkupPercent
+	fixed := constants.ConnectionPriceMarkupFixedAmount
+	invalid := "unknown"
+	amount := money.FromDecimal(decimal.RequireFromString("3.25"))
+	zero := money.FromDecimal(decimal.Zero)
+	negative := money.FromDecimal(decimal.NewFromInt(-1))
+	forty := 40.0
+	tests := []struct {
+		name                     string
+		mode                     string
+		input                    siteconnectionapp.UpdateInput
+		wantMode, wantAmount     string
+		wantPercent              float64
+		wantReapply, wantInvalid bool
+	}{
+		{name: "legacy omission", input: siteconnectionapp.UpdateInput{Name: "rename"}, wantMode: percent, wantAmount: "3.25"},
+		{name: "inactive amount", mode: percent, input: siteconnectionapp.UpdateInput{PriceMarkupAmount: &zero}, wantMode: percent, wantAmount: "0.00"},
+		{name: "inactive percent", mode: fixed, input: siteconnectionapp.UpdateInput{PriceMarkupPercent: &forty}, wantMode: fixed, wantAmount: "3.25", wantPercent: 40},
+		{name: "switch to fixed preserves amount", mode: percent, input: siteconnectionapp.UpdateInput{PriceMarkupMode: &fixed}, wantMode: fixed, wantAmount: "3.25", wantReapply: true},
+		{name: "switch to percent", mode: fixed, input: siteconnectionapp.UpdateInput{PriceMarkupMode: &percent}, wantMode: percent, wantAmount: "3.25", wantReapply: true},
+		{name: "active amount zero", mode: fixed, input: siteconnectionapp.UpdateInput{PriceMarkupAmount: &zero}, wantMode: fixed, wantAmount: "0.00", wantReapply: true},
+		{name: "unchanged fixed", mode: fixed, input: siteconnectionapp.UpdateInput{PriceMarkupMode: &fixed, PriceMarkupAmount: &amount}, wantMode: fixed, wantAmount: "3.25"},
+		{name: "active percent", mode: percent, input: siteconnectionapp.UpdateInput{PriceMarkupPercent: &forty}, wantMode: percent, wantAmount: "3.25", wantPercent: 40, wantReapply: true},
+		{name: "invalid mode", mode: percent, input: siteconnectionapp.UpdateInput{PriceMarkupMode: &invalid}, wantInvalid: true},
+		{name: "negative amount", mode: fixed, input: siteconnectionapp.UpdateInput{PriceMarkupAmount: &negative}, wantInvalid: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := newReapplyTestConn()
+			conn.PriceMarkupMode = tt.mode
+			conn.PriceMarkupAmount = amount
+			repo := &siteConnectionRepoStub{conn: conn}
+			svc := siteconnectionapp.NewService(repo, "test-secret", t.TempDir())
+			reapplier := &fakeMarkupReapplier{}
+			svc.SetMarkupReapplier(reapplier)
+			got, err := svc.Update(conn.ID, tt.input)
+			if tt.wantInvalid {
+				if !errors.Is(err, siteconnectioncontract.ErrInvalid) || repo.updated || len(reapplier.calls) != 0 {
+					t.Fatalf("invalid input changed state: %v, updated=%v, calls=%v", err, repo.updated, reapplier.calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.PriceMarkupMode != tt.wantMode || got.PriceMarkupAmount.String() != tt.wantAmount || !got.PriceMarkupPercent.Equal(decimal.NewFromFloat(tt.wantPercent)) {
+				t.Fatalf("unexpected pricing: %+v", got)
+			}
+			if (len(reapplier.calls) == 1) != tt.wantReapply {
+				t.Fatalf("reapply calls=%v, want reapply=%v (AutoSyncPrice=false)", reapplier.calls, tt.wantReapply)
+			}
+		})
+	}
+}
+
+func TestCreateConnectionMarkupDefaultsAndValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name, fields, wantMode, wantAmount string
+		invalid                            bool
+	}{
+		{"old client", `{}`, constants.ConnectionPriceMarkupPercent, "0.00", false},
+		{"string amount", `{"price_markup_mode":"fixed_amount","price_markup_amount":"3.25"}`, constants.ConnectionPriceMarkupFixedAmount, "3.25", false},
+		{"numeric amount", `{"price_markup_mode":"fixed_amount","price_markup_amount":0.25}`, constants.ConnectionPriceMarkupFixedAmount, "0.25", false},
+		{"invalid mode", `{"price_markup_mode":"both"}`, "", "", true},
+		{"negative amount", `{"price_markup_mode":"fixed_amount","price_markup_amount":"-0.01"}`, "", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			input := siteconnectionapp.CreateInput{Name: "upstream", BaseURL: "https://example.com", ApiKey: "key", ApiSecret: "secret"}
+			if err := json.Unmarshal([]byte(tt.fields), &input); err != nil {
+				t.Fatal(err)
+			}
+			repo := &siteConnectionRepoStub{}
+			svc := siteconnectionapp.NewService(repo, "test-secret", t.TempDir())
+			got, err := svc.Create(input)
+			if tt.invalid {
+				if !errors.Is(err, siteconnectioncontract.ErrInvalid) || repo.conn != nil {
+					t.Fatalf("invalid create: %v, %+v", err, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.PriceMarkupMode != tt.wantMode || got.PriceMarkupAmount.String() != tt.wantAmount {
+				t.Fatalf("unexpected pricing: %+v", got)
+			}
+		})
+	}
 }

@@ -39,6 +39,8 @@ const form = reactive({
   retry_max: 3,
   retry_intervals: '30,60,120',
   exchange_rate: 1,
+  price_markup_mode: 'percent' as 'percent' | 'fixed_amount',
+  price_markup_amount: '0.00',
   price_markup_percent: 0,
   price_rounding_mode: 'none',
   auto_sync_price: 'false',
@@ -98,6 +100,8 @@ const resetForm = () => {
     retry_max: 3,
     retry_intervals: '30,60,120',
     exchange_rate: 1,
+    price_markup_mode: 'percent',
+    price_markup_amount: '0.00',
     price_markup_percent: 0,
     price_rounding_mode: 'none',
     auto_sync_price: 'false',
@@ -136,6 +140,8 @@ const openEditModal = (conn: AdminSiteConnection) => {
       return '30,60,120'
     })(),
     exchange_rate: conn.exchange_rate ?? 1,
+    price_markup_mode: conn.price_markup_mode || 'percent',
+    price_markup_amount: String(conn.price_markup_amount ?? '0.00'),
     price_markup_percent: conn.price_markup_percent ?? 0,
     price_rounding_mode: conn.price_rounding_mode || 'none',
     auto_sync_price: conn.auto_sync_price ? 'true' : 'false',
@@ -163,7 +169,10 @@ const buildPayload = () => {
     retry_max: Number(form.retry_max) || 3,
     retry_intervals: JSON.stringify(intervals),
     exchange_rate: Number(form.exchange_rate) || 1,
-    price_markup_percent: Number(form.price_markup_percent) || 0,
+    price_markup_mode: form.price_markup_mode,
+    ...(form.price_markup_mode === 'fixed_amount'
+      ? { price_markup_amount: String(form.price_markup_amount) }
+      : { price_markup_percent: Number(form.price_markup_percent) || 0 }),
     price_rounding_mode: form.price_rounding_mode,
     auto_sync_price: form.auto_sync_price === 'true',
   }
@@ -311,7 +320,10 @@ onMounted(() => {
             <TableCell class="min-w-[200px] px-6 py-4 text-xs text-muted-foreground font-mono break-all">{{ conn.base_url }}</TableCell>
             <TableCell class="min-w-[80px] px-6 py-4 text-xs text-muted-foreground break-words">{{ conn.protocol }}</TableCell>
             <TableCell class="min-w-[80px] px-6 py-4 text-xs text-muted-foreground">
-              <span v-if="conn.price_markup_percent && Number(conn.price_markup_percent) !== 0" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+              <span v-if="conn.price_markup_mode === 'fixed_amount'" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700" :title="t('siteConnections.form.priceMarkupAmountHint')">
+                {{ t('siteConnections.fixedAmountBadge', { amount: conn.price_markup_amount ?? '0.00' }) }}
+              </span>
+              <span v-else-if="conn.price_markup_percent && Number(conn.price_markup_percent) !== 0" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
                 +{{ conn.price_markup_percent }}%
               </span>
               <span v-else class="text-muted-foreground">-</span>
@@ -337,7 +349,6 @@ onMounted(() => {
                   {{ pingingId === conn.id ? t('siteConnections.ping.loading') : 'Ping' }}
                 </Button>
                 <Button
-                  v-if="(conn.price_markup_percent && Number(conn.price_markup_percent) !== 0) || (conn.exchange_rate != null && Number(conn.exchange_rate) !== 1)"
                   size="sm"
                   variant="outline"
                   :disabled="reapplyingId === conn.id"
@@ -427,9 +438,26 @@ onMounted(() => {
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.exchangeRateHint') }}</p>
               </div>
               <div>
-                <label class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupPercent') }}</label>
+                <label for="price-markup-mode" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupMode') }}</label>
+                <Select v-model="form.price_markup_mode">
+                  <SelectTrigger id="price-markup-mode" class="h-9 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percent">{{ t('siteConnections.form.markupPercent') }}</SelectItem>
+                    <SelectItem value="fixed_amount">{{ t('siteConnections.form.markupFixedAmount') }}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div v-if="form.price_markup_mode === 'fixed_amount'">
+                <label for="price-markup-amount" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupAmount') }}</label>
+                <Input id="price-markup-amount" v-model="form.price_markup_amount" type="number" step="0.01" min="0" required placeholder="0.00" />
+                <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.priceMarkupAmountHint') }}</p>
+              </div>
+              <div v-else>
+                <label for="price-markup-percent" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupPercent') }}</label>
                 <div class="relative">
-                  <Input v-model.number="form.price_markup_percent" type="number" step="0.01" min="0" placeholder="0" />
+                  <Input id="price-markup-percent" v-model.number="form.price_markup_percent" type="number" step="0.01" min="0" placeholder="0" />
                   <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
                 </div>
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.priceMarkupPercentHint') }}</p>
@@ -461,6 +489,7 @@ onMounted(() => {
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.autoSyncPriceHint') }}</p>
               </div>
             </div>
+            <p class="mt-3 text-xs text-muted-foreground">{{ t('siteConnections.form.pricingSaveHint') }}</p>
           </div>
 
           <div class="flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">

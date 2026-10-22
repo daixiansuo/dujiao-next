@@ -127,33 +127,29 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 	// 确定交付类型：上游商品映射后统一使用 upstream 类型
 	fulfillmentType := constants.FulfillmentTypeUpstream
 
-	// 解析价格（先汇率转换，再应用加价比例）
+	// 先确定源价格，再换汇、加价，避免固定加价掩盖商品零价的 SKU 兜底。
 	exchangeRate := conn.ExchangeRate
 	markupPercent := conn.PriceMarkupPercent
+	markupAmount := conn.PriceMarkupAmount.Decimal
+	markupMode := conn.PriceMarkupMode
 	roundingMode := conn.PriceRoundingMode
 
-	priceAmount, priceErr := decimal.NewFromString(upProduct.PriceAmount)
-	if priceErr != nil {
-		logger.Warnw("import_product_price_parse_error",
-			"upstream_product_id", upstreamProductID,
-			"price_amount", upProduct.PriceAmount,
-			"error", priceErr,
-		)
-		priceAmount = decimal.Zero
-	}
-	costPriceAmount := convertCurrency(priceAmount, exchangeRate) // 成本价 = 上游价格 × 汇率（本地币种，不含加价）
-	priceAmount = CalculateLocalPrice(priceAmount, exchangeRate, markupPercent, roundingMode)
-	if priceAmount.LessThanOrEqual(decimal.Zero) && len(upProduct.SKUs) > 0 {
-		// 取转换加价后 SKU 最低价
+	upstreamPrice, priceErr := decimal.NewFromString(upProduct.PriceAmount)
+	if priceErr != nil || upstreamPrice.LessThanOrEqual(decimal.Zero) {
+		found := false
 		for _, sku := range upProduct.SKUs {
-			skuPrice, _ := decimal.NewFromString(sku.PriceAmount)
-			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, roundingMode)
-			if localPrice.GreaterThan(decimal.Zero) && (priceAmount.IsZero() || localPrice.LessThan(priceAmount)) {
-				priceAmount = localPrice
-				costPriceAmount = convertCurrency(skuPrice, exchangeRate)
+			skuPrice, err := decimal.NewFromString(sku.PriceAmount)
+			if err == nil && skuPrice.GreaterThanOrEqual(decimal.Zero) && (!found || skuPrice.LessThan(upstreamPrice)) {
+				upstreamPrice = skuPrice
+				found = true
 			}
 		}
+		if priceErr != nil && !found {
+			return nil, fmt.Errorf("parse upstream product price: %w", priceErr)
+		}
 	}
+	costPriceAmount := convertCurrency(upstreamPrice, exchangeRate)
+	priceAmount := CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
 
 	// 未指定 slug 时优先沿用上游 slug，不可用再回退自动生成
 	if slug == "" {
@@ -198,14 +194,9 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		for _, upSKU := range upProduct.SKUs {
 			skuPrice, skuPriceErr := decimal.NewFromString(upSKU.PriceAmount)
 			if skuPriceErr != nil {
-				logger.Warnw("import_sku_price_parse_error",
-					"upstream_sku_id", upSKU.ID,
-					"price_amount", upSKU.PriceAmount,
-					"error", skuPriceErr,
-				)
-				skuPrice = decimal.Zero
+				return fmt.Errorf("parse upstream sku %d price: %w", upSKU.ID, skuPriceErr)
 			}
-			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, roundingMode)
+			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
 			localSKU := productdomain.ProductSKU{
 				ProductID:       product.ID,
 				SKUCode:         upSKU.SKUCode,
@@ -242,6 +233,8 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 				upProduct.WholesalePrices,
 				exchangeRate,
 				markupPercent,
+				markupAmount,
+				markupMode,
 				roundingMode,
 				buildUpstreamWholesaleSKUIndex(localSKUs, upProduct.SKUs, nil),
 			)
@@ -401,7 +394,7 @@ func buildUpstreamWholesaleSKUIndex(localSKUs []productdomain.ProductSKU, upstre
 	return index
 }
 
-func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exchangeRate, markupPercent decimal.Decimal, roundingMode string, indexes ...upstreamWholesaleSKUIndex) productdomain.WholesalePriceTiers {
+func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exchangeRate, markupPercent, markupAmount decimal.Decimal, markupMode, roundingMode string, indexes ...upstreamWholesaleSKUIndex) productdomain.WholesalePriceTiers {
 	if len(tiers) == 0 {
 		return productdomain.WholesalePriceTiers{}
 	}
@@ -421,7 +414,7 @@ func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exc
 			)
 			continue
 		}
-		localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, roundingMode)
+		localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
 		if localPrice.LessThanOrEqual(decimal.Zero) {
 			skipped++
 			logger.Warnw("convert_upstream_wholesale_price_invalid",

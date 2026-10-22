@@ -52,6 +52,11 @@ func (s *Service) Create(input CreateInput) (*siteconnectiondomain.Connection, e
 		return nil, siteconnectioncontract.ErrInvalid
 	}
 
+	markupMode, err := normalizePriceMarkupMode(input.PriceMarkupMode)
+	if err != nil || input.PriceMarkupAmount.IsNegative() {
+		return nil, siteconnectioncontract.ErrInvalid
+	}
+
 	protocol := strings.TrimSpace(input.Protocol)
 	if protocol == "" {
 		protocol = constants.ConnectionProtocolDujiaoNext
@@ -87,6 +92,8 @@ func (s *Service) Create(input CreateInput) (*siteconnectiondomain.Connection, e
 		RetryMax:           retryMax,
 		RetryIntervals:     retryIntervals,
 		ExchangeRate:       s.normalizeExchangeRate(input.ExchangeRate),
+		PriceMarkupMode:    markupMode,
+		PriceMarkupAmount:  input.PriceMarkupAmount,
 		PriceMarkupPercent: decimal.NewFromFloat(input.PriceMarkupPercent),
 		PriceRoundingMode:  roundingMode,
 		AutoSyncPrice:      input.AutoSyncPrice,
@@ -110,7 +117,13 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 
 	// 记录定价配置旧值，用于判断本次保存是否需要重算已映射商品的本地售价。
 	prevExchangeRate := conn.ExchangeRate
+	prevMarkupMode, err := normalizePriceMarkupMode(conn.PriceMarkupMode)
+	if err != nil {
+		return nil, err
+	}
 	prevMarkupPercent := conn.PriceMarkupPercent
+	prevMarkupAmount := conn.PriceMarkupAmount
+	conn.PriceMarkupMode = prevMarkupMode
 	prevRoundingMode := conn.PriceRoundingMode
 
 	if strings.TrimSpace(input.Name) != "" {
@@ -144,6 +157,18 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 	if input.ExchangeRate != nil {
 		conn.ExchangeRate = s.normalizeExchangeRate(*input.ExchangeRate)
 	}
+	if input.PriceMarkupMode != nil {
+		conn.PriceMarkupMode, err = normalizePriceMarkupMode(*input.PriceMarkupMode)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if input.PriceMarkupAmount != nil {
+		if input.PriceMarkupAmount.IsNegative() {
+			return nil, siteconnectioncontract.ErrInvalid
+		}
+		conn.PriceMarkupAmount = *input.PriceMarkupAmount
+	}
 	if input.PriceMarkupPercent != nil {
 		conn.PriceMarkupPercent = decimal.NewFromFloat(*input.PriceMarkupPercent)
 	}
@@ -165,8 +190,12 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 	// 定价配置（汇率/加价/取整）发生实际变化时，自动重算该连接已映射商品的本地售价，
 	// 避免「改了汇率但已有商品价格不联动」。重算为尽力而为：失败不影响连接保存本身，
 	// 仅记录告警，用户仍可通过「重新应用加价」手动补救。
+	markupChanged := !conn.PriceMarkupPercent.Equal(prevMarkupPercent)
+	if conn.PriceMarkupMode == constants.ConnectionPriceMarkupFixedAmount {
+		markupChanged = !conn.PriceMarkupAmount.Equal(prevMarkupAmount.Decimal)
+	}
 	priceConfigChanged := !conn.ExchangeRate.Equal(prevExchangeRate) ||
-		!conn.PriceMarkupPercent.Equal(prevMarkupPercent) ||
+		conn.PriceMarkupMode != prevMarkupMode || markupChanged ||
 		conn.PriceRoundingMode != prevRoundingMode
 	if priceConfigChanged && s.markupReapplier != nil {
 		if _, err := s.markupReapplier.ReapplyMarkup(conn.ID); err != nil {
@@ -176,6 +205,20 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 	}
 
 	return conn, nil
+}
+
+// normalizePriceMarkupMode 将旧连接的空模式视为百分比，并校验新输入。
+func normalizePriceMarkupMode(mode string) (string, error) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = constants.ConnectionPriceMarkupPercent
+	}
+	switch mode {
+	case constants.ConnectionPriceMarkupPercent, constants.ConnectionPriceMarkupFixedAmount:
+		return mode, nil
+	default:
+		return "", siteconnectioncontract.ErrInvalid
+	}
 }
 
 // Delete 删除连接

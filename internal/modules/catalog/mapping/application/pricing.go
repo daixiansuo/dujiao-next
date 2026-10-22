@@ -1,6 +1,9 @@
 package application
 
-import "github.com/shopspring/decimal"
+import (
+	"github.com/dujiao-next/internal/constants"
+	"github.com/shopspring/decimal"
+)
 
 var (
 	hundred    = decimal.NewFromInt(100)
@@ -21,11 +24,15 @@ func convertCurrency(upstreamPrice, exchangeRate decimal.Decimal) decimal.Decima
 // CalculateLocalPrice 先按汇率转换，再应用加价和取整。
 // 计算链路：上游价格 × 汇率 → 加价 → 取整 → 本地售价。
 // exchangeRate 为 0 或负数时视为 1（同币种）。
-func CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent decimal.Decimal, roundingMode string) decimal.Decimal {
-	if exchangeRate.LessThanOrEqual(decimal.Zero) {
-		exchangeRate = decimal.NewFromInt(1)
+func CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount decimal.Decimal, markupMode, roundingMode string) decimal.Decimal {
+	converted := convertCurrency(upstreamPrice, exchangeRate)
+	if markupMode == constants.ConnectionPriceMarkupFixedAmount {
+		if markupAmount.IsZero() {
+			return converted.Round(roundScale)
+		}
+		return roundLocalPrice(converted.Add(markupAmount), roundingMode)
 	}
-	converted := upstreamPrice.Mul(exchangeRate)
+	// 空模式兼容旧连接的百分比规则。
 	return CalculateMarkedUpPrice(converted, markupPercent, roundingMode)
 }
 
@@ -41,6 +48,10 @@ func CalculateMarkedUpPrice(upstreamPrice, markupPercent decimal.Decimal, roundi
 	multiplier := decimal.NewFromInt(1).Add(markupPercent.Div(hundred))
 	result := upstreamPrice.Mul(multiplier)
 
+	return roundLocalPrice(result, roundingMode)
+}
+
+func roundLocalPrice(result decimal.Decimal, roundingMode string) decimal.Decimal {
 	if result.IsNegative() {
 		return decimal.Zero
 	}

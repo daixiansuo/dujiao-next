@@ -435,6 +435,12 @@ const (
 	ConnectionProtocolDujiaoNext = "dujiao-next"
 )
 
+// 上游连接加价方式。
+const (
+	ConnectionPriceMarkupPercent     = "percent"
+	ConnectionPriceMarkupFixedAmount = "fixed_amount"
+)
+
 // API 凭证状态常量
 const (
 	ApiCredentialStatusPendingReview = "pending_review"

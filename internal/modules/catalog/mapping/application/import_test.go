@@ -15,7 +15,7 @@ import (
 func TestConvertUpstreamWholesalePricesRemapsUpstreamSKUScope(t *testing.T) {
 	tiers := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
 		{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(80))},
-	}, decimal.NewFromInt(1), decimal.Zero, "none", buildUpstreamWholesaleSKUIndex(
+	}, decimal.NewFromInt(1), decimal.Zero, decimal.Zero, "", "none", buildUpstreamWholesaleSKUIndex(
 		[]productdomain.ProductSKU{{ID: 11, SKUCode: "SKU-A"}},
 		[]upstream.UpstreamSKU{{ID: 201, SKUCode: "SKU-A"}},
 		nil,
@@ -32,7 +32,7 @@ func TestConvertUpstreamWholesalePricesRemapsUpstreamSKUScope(t *testing.T) {
 func TestConvertUpstreamWholesalePricesDropsUnmappedUpstreamSKUID(t *testing.T) {
 	tiers := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
 		{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(80))},
-	}, decimal.NewFromInt(1), decimal.Zero, "none")
+	}, decimal.NewFromInt(1), decimal.Zero, decimal.Zero, "", "none")
 
 	if len(tiers) != 0 {
 		t.Fatalf("expected unmapped upstream sku_id tier to be dropped, got %+v", tiers)
@@ -81,5 +81,36 @@ func TestListAllUpstreamProductsStopsAtPageLimit(t *testing.T) {
 	}
 	if adapter.calls != maxUpstreamProductPages {
 		t.Fatalf("expected %d calls, got %d", maxUpstreamProductPages, adapter.calls)
+	}
+}
+
+func TestConvertWholesaleFixedAmountPrices(t *testing.T) {
+	tiers := productdomain.WholesalePriceTiers{
+		{MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(4))},
+		{MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.NewFromInt(3))},
+		{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(2))},
+	}
+	got := convertUpstreamWholesalePrices(tiers, decimal.NewFromInt(2), decimal.NewFromInt(40), decimal.NewFromInt(3), "fixed_amount", "none", buildUpstreamWholesaleSKUIndex(
+		[]productdomain.ProductSKU{{ID: 11, SKUCode: "SKU-A"}}, []upstream.UpstreamSKU{{ID: 201, SKUCode: "SKU-A"}}, nil,
+	))
+	if len(got) != 3 {
+		t.Fatalf("tiers: %+v", got)
+	}
+	want := map[uint]map[int]string{0: {5: "11.00", 10: "9.00"}, 11: {5: "7.00"}}
+	for _, tier := range got {
+		if tier.UnitPrice.String() != want[tier.SKUID][tier.MinQuantity] {
+			t.Fatalf("unexpected tier: %+v", tier)
+		}
+	}
+}
+
+func TestConvertWholesaleRetainsExistingValidationAfterFixedRounding(t *testing.T) {
+	// Existing validation rejects tiers collapsed by rounding; do not invent new tiers.
+	got := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
+		{MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.RequireFromString("4.02"))},
+		{MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.RequireFromString("4.01"))},
+	}, decimal.NewFromInt(1), decimal.Zero, decimal.NewFromInt(3), "fixed_amount", "ceil_int")
+	if len(got) != 0 {
+		t.Fatalf("expected invalid rounded tiers to be rejected, got %+v", got)
 	}
 }
