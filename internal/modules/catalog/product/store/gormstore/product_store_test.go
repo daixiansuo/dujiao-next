@@ -2,6 +2,7 @@ package gormstore
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -749,5 +750,96 @@ func TestProductRepositoryListUpdatedAfterIncludesStockChanges(t *testing.T) {
 	}
 	if !got[skuChanged.ID] || !got[cardChanged.ID] || got[untouched.ID] {
 		t.Fatalf("unexpected incremental rows: sku=%v card=%v untouched=%v", got[skuChanged.ID], got[cardChanged.ID], got[untouched.ID])
+	}
+}
+
+func TestListForStorefrontSortsByWeightDisplayPriceAndCreationTime(t *testing.T) {
+	repo, db := setupProductStoreTest(t)
+	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	newer := created.Add(time.Hour)
+	amount := func(value string) money.Amount {
+		return money.FromDecimal(decimal.RequireFromString(value))
+	}
+	sku := func(code, price string, weight int, active bool, deleted *time.Time) productdomain.ProductSKU {
+		return productdomain.ProductSKU{SKUCode: code, PriceAmount: amount(price), SortOrder: weight, IsActive: active, DeletedAt: deleted}
+	}
+	fixtures := []struct {
+		slug    string
+		price   string
+		weight  int
+		created time.Time
+		skus    []productdomain.ProductSKU
+	}{
+		{"multi", "1", 10, created, []productdomain.ProductSKU{sku("first", "89.90", 100, true, nil), sku("minimum", "1", 10, true, nil)}},
+		{"hundred", "100", 10, created, nil},
+		{"decimal", "9.99", 10, created, nil},
+		{"cheap", "2", 10, created, nil},
+		{"pinned", "500", 20, created, nil},
+		{"older-ten", "10", 10, created, nil},
+		{"newer-ten", "10", 10, newer, nil},
+		{"tied-ten", "10", 10, newer, nil},
+		{"sku-tie", "10", 10, created, []productdomain.ProductSKU{sku("first", "20", 10, true, nil), sku("second", "10", 10, true, nil)}},
+		{"fallback", "15", 10, created, []productdomain.ProductSKU{sku("inactive", "0.50", 100, false, nil), sku("deleted", "0.25", 200, true, &created)}},
+		{"low-weight", "1", 0, newer, nil},
+		{"visible-sku", "1", 10, created, []productdomain.ProductSKU{sku("inactive", "0.50", 100, false, nil), sku("deleted", "0.25", 200, true, &created), sku("visible", "25", 10, true, nil)}},
+	}
+	for _, fixture := range fixtures {
+		product := productdomain.Product{
+			CategoryID: 1, Slug: fixture.slug, TitleJSON: jsonmap.JSON{"zh-CN": fixture.slug},
+			PriceAmount: amount(fixture.price), SortOrder: fixture.weight, CreatedAt: fixture.created,
+			IsActive: true, SKUs: fixture.skus,
+		}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatalf("seed product %s: %v", fixture.slug, err)
+		}
+	}
+
+	// SKU 的 GORM 默认值为 true，显式落库停用状态。
+	if err := db.Model(&productdomain.ProductSKU{}).Where("sku_code = ?", "inactive").Update("is_active", false).Error; err != nil {
+		t.Fatalf("disable fixture SKUs: %v", err)
+	}
+
+	want := []string{"pinned", "cheap", "decimal", "tied-ten", "newer-ten", "older-ten", "fallback", "sku-tie", "visible-sku", "multi", "hundred", "low-weight"}
+	for _, pageSize := range []int{3, 50} {
+		var got []string
+		for page := 1; ; page++ {
+			rows, total, err := repo.ListForStorefront(productcontract.ListFilter{OnlyActive: true, WithCategory: true, Page: page, PageSize: pageSize})
+			if err != nil {
+				t.Fatalf("page size %d page %d: %v", pageSize, page, err)
+			}
+			if total != int64(len(want)) {
+				t.Fatalf("total want %d got %d", len(want), total)
+			}
+			for _, row := range rows {
+				got = append(got, row.Slug)
+			}
+			if len(rows) == 0 {
+				break
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("page size %d: order want %v got %v", pageSize, want, got)
+		}
+	}
+}
+
+func TestListRetainsCreationTimeOrderWithoutStorefrontPriceSorting(t *testing.T) {
+	repo, db := setupProductStoreTest(t)
+	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for i, price := range []int64{2, 100} {
+		product := productdomain.Product{
+			CategoryID: 1, Slug: fmt.Sprintf("legacy-%d", i), TitleJSON: jsonmap.JSON{"zh-CN": "legacy"},
+			PriceAmount: money.FromDecimal(decimal.NewFromInt(price)), CreatedAt: created.Add(time.Duration(i) * time.Hour), IsActive: true,
+		}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatalf("seed legacy product: %v", err)
+		}
+	}
+	rows, total, err := repo.List(productcontract.ListFilter{OnlyActive: true, Page: 1, PageSize: 20})
+	if err != nil || total != 2 || len(rows) != 2 {
+		t.Fatalf("legacy list: total=%d rows=%d err=%v", total, len(rows), err)
+	}
+	if rows[0].Slug != "legacy-1" || rows[1].Slug != "legacy-0" {
+		t.Fatalf("legacy list must keep newest first, got %s, %s", rows[0].Slug, rows[1].Slug)
 	}
 }

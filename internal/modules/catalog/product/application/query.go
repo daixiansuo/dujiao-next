@@ -16,6 +16,7 @@ import (
 
 // ProductRepository 是读取应用服务所需的最小商品持久化端口。
 type ProductRepository interface {
+	ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
 	List(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
 	GetBySlug(slug string, onlyActive bool) (*productdomain.Product, error)
 	GetAdminByID(id string) (*productdomain.Product, error)
@@ -81,30 +82,30 @@ func (s *Service) ListPublic(categoryID, search string, page, pageSize int) ([]p
 
 // ListPublicForTenant 获取当前租户上下文的公开商品列表。
 func (s *Service) ListPublicForTenant(tenant reseller.TenantContext, resellerRepo HiddenProductRepository, categoryID, search string, page, pageSize int) ([]productdomain.Product, int64, error) {
-	if !tenant.IsReseller() {
-		return s.ListPublic(categoryID, search, page, pageSize)
-	}
-	if tenant.ResellerID == nil || resellerRepo == nil {
+	if tenant.IsReseller() && (tenant.ResellerID == nil || resellerRepo == nil) {
 		return nil, 0, productcontract.ErrResellerProductNotListed
 	}
 	categoryIDs, err := expandPublicCategoryIDs(s.categories, categoryID)
 	if err != nil {
 		return nil, 0, err
 	}
+	filter := productcontract.ListFilter{
+		Page:         page,
+		PageSize:     pageSize,
+		CategoryID:   categoryID,
+		CategoryIDs:  categoryIDs,
+		Search:       search,
+		OnlyActive:   true,
+		WithCategory: true,
+	}
+	if !tenant.IsReseller() {
+		return s.products.ListForStorefront(filter)
+	}
 	hiddenIDs, err := resellerRepo.ListHiddenProductIDs(*tenant.ResellerID)
 	if err != nil {
 		return nil, 0, err
 	}
-	filter := productcontract.ListFilter{
-		Page:              page,
-		PageSize:          pageSize,
-		CategoryID:        categoryID,
-		CategoryIDs:       categoryIDs,
-		Search:            search,
-		OnlyActive:        true,
-		WithCategory:      true,
-		ExcludeProductIDs: hiddenIDs,
-	}
+	filter.ExcludeProductIDs = hiddenIDs
 	return s.products.List(filter)
 }
 
