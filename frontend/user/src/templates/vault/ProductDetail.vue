@@ -2,7 +2,7 @@
   <div class="mx-auto w-full max-w-[1180px] px-6 pb-6">
     <!-- Loading -->
     <div v-if="loading" class="grid gap-11 py-2.5 lg:grid-cols-2">
-      <div class="h-[380px] rounded-xl bg-[linear-gradient(135deg,#3a3950,var(--ink))] opacity-50"></div>
+      <div class="aspect-[8/5] w-full rounded-xl bg-[linear-gradient(135deg,#3a3950,var(--ink))] opacity-50"></div>
       <div class="grid content-start gap-4 pt-2">
         <div class="h-7 w-3/5 rounded-md border bg-card"></div>
         <div class="h-12 w-2/5 rounded-md border bg-card"></div>
@@ -23,9 +23,14 @@
       <section class="grid gap-11 py-2.5 lg:grid-cols-2">
         <!-- 图区 -->
         <div>
-          <div class="relative grid h-[380px] place-items-center overflow-hidden rounded-xl" :class="images.length ? '' : 'bg-[linear-gradient(135deg,#7b74f2,var(--red))]'">
-            <img v-if="currentImage" :src="currentImage" :alt="getLocalizedText(product.title)" class="absolute inset-0 h-full w-full object-cover" />
-            <Package v-else class="h-[110px] w-[110px] text-white/95" />
+          <div class="relative grid aspect-[8/5] w-full place-items-center overflow-hidden rounded-xl bg-muted">
+            <SmartImage :src="currentImage" :alt="getLocalizedText(product.title)" loading="eager" img-class="absolute inset-0 h-full w-full object-contain">
+              <template #fallback>
+                <div class="absolute inset-0 grid place-items-center bg-[linear-gradient(135deg,#7b74f2,var(--red))]">
+                  <Package class="h-[110px] w-[110px] text-white/95" />
+                </div>
+              </template>
+            </SmartImage>
           </div>
           <div v-if="images.length > 1" class="mt-3.5 flex flex-wrap gap-3">
             <button
@@ -35,7 +40,7 @@
               :class="img === currentImage ? 'border-primary' : 'border-border'"
               @click="currentImage = img"
             >
-              <img :src="img" :alt="`${idx + 1}`" loading="lazy" class="h-full w-full object-cover" />
+              <SmartImage :src="img" :alt="`${getLocalizedText(product.title)} ${idx + 1}`" img-class="h-full w-full object-contain" />
             </button>
           </div>
         </div>
@@ -246,6 +251,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../../components/SmartImage.vue'
 import { computed, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {

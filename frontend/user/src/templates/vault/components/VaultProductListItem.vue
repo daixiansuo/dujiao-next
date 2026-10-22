@@ -6,12 +6,15 @@
   >
     <!-- Thumbnail -->
     <span
-      class="relative grid h-14 w-14 flex-none place-items-center overflow-hidden rounded-[11px] sm:h-16 sm:w-16"
-      :class="coverClass"
+      class="relative grid h-14 w-14 flex-none place-items-center overflow-hidden rounded-[11px] bg-muted sm:h-16 sm:w-16"
     >
-      <img v-if="coverImage" :src="coverImage" :alt="title" loading="lazy" class="absolute inset-0 h-full w-full object-cover" @error="imageErrored = true" />
-      <Package v-else class="relative z-[1] h-6 w-6 text-white" />
-      <span v-if="soldOut" class="absolute inset-0 grid place-items-center bg-black/55 text-[10px] font-bold text-white">{{ t('products.stockStatus.outOfStock') }}</span>
+      <SmartImage :src="coverImage" :alt="title" img-class="absolute inset-0 h-full w-full object-contain">
+        <template #fallback>
+          <span class="absolute inset-0 grid place-items-center" :class="coverClass">
+            <Package class="h-6 w-6 text-white" />
+          </span>
+        </template>
+      </SmartImage>
     </span>
 
     <!-- Info -->
@@ -51,7 +54,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
+import SmartImage from '../../../components/SmartImage.vue'
+import { computed, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlarmClock, ChevronRight, Package, ShoppingCart, XCircle, Zap } from 'lucide-vue-next'
 import { getFirstImageUrl, getImageUrl } from '../../../utils/image'
@@ -79,9 +83,7 @@ const categoryName = computed(() => getLocalizedText(props.product?.category?.na
 const soldOut = computed(() => isSoldOut(props.product))
 const promo = computed(() => hasPromotionPrice(props.product))
 
-const imageErrored = ref(false)
 const coverImage = computed(() => {
-  if (imageErrored.value) return ''
   const primary = getFirstImageUrl(props.product?.images)
   if (primary) return primary
   const icon = props.product?.category?.icon

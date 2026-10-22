@@ -67,18 +67,16 @@
             <div class="flex gap-3.5 mb-4">
               <!-- Image -->
               <div
-                class="w-[90px] h-[90px] md:w-[100px] md:h-[100px] rounded-xl md:rounded-2xl overflow-hidden shrink-0 border cursor-pointer"
+                class="w-[90px] h-[90px] md:w-[100px] md:h-[100px] rounded-xl md:rounded-2xl overflow-hidden shrink-0 border cursor-pointer bg-muted"
                 @click="goToDetail"
               >
-                <img
-                  v-if="productImage"
-                  :src="productImage"
-                  :alt="productTitle"
-                  class="w-full h-full object-cover"
-                />
-                <div v-else class="w-full h-full flex items-center justify-center bg-muted">
-                  <ImageIcon class="w-7 h-7 text-muted-foreground" :stroke-width="1.5" />
-                </div>
+                <SmartImage :src="productImage" :alt="productTitle" img-class="w-full h-full object-contain">
+                  <template #fallback>
+                    <div class="w-full h-full flex items-center justify-center">
+                      <ImageIcon class="w-7 h-7 text-muted-foreground" :stroke-width="1.5" />
+                    </div>
+                  </template>
+                </SmartImage>
               </div>
 
               <!-- Info -->
@@ -328,6 +326,7 @@
 
 
 <script setup lang="ts">
+import SmartImage from './SmartImage.vue'
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'

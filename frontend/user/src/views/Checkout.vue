@@ -38,7 +38,7 @@
                     <SmartImage
                       :src="checkoutItemImage(item)"
                       :alt="getLocalizedText(item.title)"
-                      img-class="h-full w-full object-cover"
+                      img-class="h-full w-full object-contain"
                     />
                   </div>
                   <div class="min-w-0">

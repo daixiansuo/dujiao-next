@@ -20,53 +20,53 @@
       <Button as-child class="mt-2 rounded-full" size="sm"><RouterLink to="/products">{{ t('cart.emptyAction') }}</RouterLink></Button>
     </div>
 
-    <div v-else class="grid items-start gap-7 lg:grid-cols-[1fr_340px]">
+    <div v-else class="grid grid-cols-1 items-start gap-7 lg:grid-cols-[1fr_340px]">
       <!-- 商品列表 -->
-      <div class="grid gap-4">
-        <article v-for="item in cartItems" :key="cartItemKey(item)" class="flex gap-4 rounded-xl border bg-card p-4">
-          <RouterLink :to="`/products/${item.slug}`" class="relative grid h-[88px] w-[88px] flex-none place-items-center overflow-hidden rounded-md bg-secondary">
-            <img v-if="cartItemImage(item)" :src="cartItemImage(item)" :alt="getLocalizedText(item.title)" loading="lazy" class="absolute inset-0 h-full w-full object-cover" />
-            <Package v-else class="h-10 w-10 text-muted-foreground" />
+      <div class="grid grid-cols-1 gap-4">
+        <article v-for="item in cartItems" :key="cartItemKey(item)" class="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-3 rounded-xl border bg-card p-4 sm:grid-cols-[128px_minmax(0,1fr)_auto] sm:gap-x-5">
+          <div class="col-span-2 flex min-w-0 items-start justify-between gap-3 sm:contents">
+            <RouterLink :to="`/products/${item.slug}`" class="min-w-0 line-clamp-2 font-bold sm:col-start-2 sm:row-start-1 hover:text-primary">{{ getLocalizedText(item.title) }}</RouterLink>
+            <button type="button" class="grid h-10 w-10 flex-none self-start sm:col-start-3 sm:row-span-2 sm:row-start-1 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" :aria-label="t('cart.remove')" @click="removeWithUndo(item)">
+              <Trash2 class="h-[18px] w-[18px]" />
+            </button>
+          </div>
+
+          <RouterLink :to="`/products/${item.slug}`" class="relative row-start-2 grid aspect-[8/5] self-start place-items-center overflow-hidden rounded-md bg-secondary sm:row-span-2 sm:row-start-1">
+            <SmartImage :src="cartItemImage(item)" :alt="getLocalizedText(item.title)" img-class="absolute inset-0 h-full w-full object-contain">
+              <template #fallback><Package class="h-10 w-10 text-muted-foreground" /></template>
+            </SmartImage>
           </RouterLink>
 
-          <div class="min-w-0 flex-1">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <RouterLink :to="`/products/${item.slug}`" class="block truncate font-bold hover:text-primary">{{ getLocalizedText(item.title) }}</RouterLink>
-                <p class="mt-1 text-[13px] text-muted-foreground">{{ t('cart.priceLabel') }}：{{ formatPrice(item.priceAmount, totalCurrency) }}</p>
-                <p v-if="itemSkuDisplay(item)" class="mt-1 text-[13px] text-muted-foreground">{{ t('cart.skuLabel') }}：{{ itemSkuDisplay(item) }}</p>
-                <p v-if="itemStockHint(item)" class="mt-1 text-[13px] text-muted-foreground">{{ itemStockHint(item) }}</p>
-                <div class="mt-2 flex flex-wrap gap-1.5">
-                  <Badge :variant="item.purchaseType === 'guest' ? 'warning' : 'info'" size="sm" class="rounded-full">{{ item.purchaseType === 'guest' ? t('productPurchase.guest') : t('productPurchase.member') }}</Badge>
-                  <Badge variant="success" size="sm" class="rounded-full">{{ item.fulfillmentType === 'auto' ? t('products.fulfillmentType.auto') : t('products.fulfillmentType.manual') }}</Badge>
-                </div>
-              </div>
-              <button type="button" class="grid h-10 w-10 flex-none place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" :aria-label="t('cart.remove')" @click="removeWithUndo(item)">
-                <Trash2 class="h-[18px] w-[18px]" />
-              </button>
+          <div class="col-start-2 row-start-2 min-w-0">
+            <p class="text-[13px] text-muted-foreground">{{ t('cart.priceLabel') }}：{{ formatPrice(item.priceAmount, totalCurrency) }}</p>
+            <p v-if="itemSkuDisplay(item)" class="mt-1 break-words text-[13px] text-muted-foreground">{{ t('cart.skuLabel') }}：{{ itemSkuDisplay(item) }}</p>
+            <p v-if="itemStockHint(item)" class="mt-1 text-[13px] text-muted-foreground">{{ itemStockHint(item) }}</p>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <Badge :variant="item.purchaseType === 'guest' ? 'warning' : 'info'" size="sm" class="rounded-full">{{ item.purchaseType === 'guest' ? t('productPurchase.guest') : t('productPurchase.member') }}</Badge>
+              <Badge variant="success" size="sm" class="rounded-full">{{ item.fulfillmentType === 'auto' ? t('products.fulfillmentType.auto') : t('products.fulfillmentType.manual') }}</Badge>
             </div>
-
-            <div class="mt-3.5 flex flex-wrap items-center justify-between gap-3 border-t pt-3.5">
-              <div class="inline-flex items-center overflow-hidden rounded-full border-2 border-hairline-strong">
-                <button type="button" class="grid h-10 w-[38px] place-items-center bg-card text-foreground disabled:opacity-35" :aria-label="t('cart.remove')" :disabled="item.quantity <= itemPurchaseMin(item)" @click="updateQty(item, item.quantity - 1)"><Minus class="h-4 w-4" /></button>
-                <input
-                  type="number"
-                  class="h-10 w-[46px] border-x bg-card text-center font-bold tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  :value="item.quantity"
-                  :min="itemPurchaseMin(item)"
-                  :max="itemMaxQuantity(item)"
-                  @change="handleQtyChange(item, $event)"
-                />
-                <button type="button" class="grid h-10 w-[38px] place-items-center bg-card text-foreground disabled:opacity-35" :aria-label="t('cart.remove')" :disabled="item.quantity >= itemMaxQuantity(item)" @click="updateQty(item, item.quantity + 1)"><Plus class="h-4 w-4" /></button>
-              </div>
-              <div class="text-right">
-                <span class="block text-[11px] uppercase tracking-[0.04em] text-muted-foreground">{{ t('checkout.totalPriceLabel') }}</span>
-                <strong class="text-base">{{ itemSubtotal(item) }}</strong>
-              </div>
-            </div>
-
-            <div v-if="quantityWarning(item)" class="mt-3 rounded-sm bg-warning/10 px-3 py-2 text-[13px] font-semibold text-warning">{{ quantityWarning(item) }}</div>
           </div>
+
+          <div class="col-span-2 flex flex-wrap items-center justify-between gap-3 border-t pt-3.5 sm:col-start-2">
+            <div class="inline-flex items-center overflow-hidden rounded-full border-2 border-hairline-strong">
+              <button type="button" class="grid h-10 w-[38px] place-items-center bg-card text-foreground disabled:opacity-35" :aria-label="t('cart.remove')" :disabled="item.quantity <= itemPurchaseMin(item)" @click="updateQty(item, item.quantity - 1)"><Minus class="h-4 w-4" /></button>
+              <input
+                type="number"
+                class="h-10 w-[46px] border-x bg-card text-center font-bold tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                :value="item.quantity"
+                :min="itemPurchaseMin(item)"
+                :max="itemMaxQuantity(item)"
+                @change="handleQtyChange(item, $event)"
+              />
+              <button type="button" class="grid h-10 w-[38px] place-items-center bg-card text-foreground disabled:opacity-35" :aria-label="t('cart.remove')" :disabled="item.quantity >= itemMaxQuantity(item)" @click="updateQty(item, item.quantity + 1)"><Plus class="h-4 w-4" /></button>
+            </div>
+            <div class="ml-auto text-right">
+              <span class="block text-[11px] uppercase tracking-[0.04em] text-muted-foreground">{{ t('checkout.totalPriceLabel') }}</span>
+              <strong class="text-base">{{ itemSubtotal(item) }}</strong>
+            </div>
+          </div>
+
+          <div v-if="quantityWarning(item)" class="col-span-2 rounded-sm bg-warning/10 px-3 py-2 text-[13px] font-semibold text-warning sm:col-start-2">{{ quantityWarning(item) }}</div>
         </article>
       </div>
 
@@ -92,6 +92,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../../components/SmartImage.vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight, ChevronRight, Minus, Package, Plus, ShoppingCart, Trash2 } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'

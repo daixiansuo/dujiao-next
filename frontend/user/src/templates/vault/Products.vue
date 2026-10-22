@@ -35,7 +35,15 @@
       <!-- 商品区 -->
       <section>
         <div v-if="loading" class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(228px,1fr))]">
-          <div v-for="i in 9" :key="i" class="h-[280px] rounded-lg border bg-card"></div>
+          <div v-for="i in 9" :key="i" class="flex flex-col gap-2.5 rounded-lg border bg-card p-3">
+            <div class="aspect-[8/5] w-full rounded-[13px] theme-skeleton"></div>
+            <div class="mx-1 space-y-2 py-1">
+              <div class="h-3 w-16 rounded theme-skeleton"></div>
+              <div class="h-5 w-3/4 rounded theme-skeleton"></div>
+              <div class="h-5 w-full rounded theme-skeleton"></div>
+              <div class="h-8 w-20 rounded theme-skeleton"></div>
+            </div>
+          </div>
         </div>
 
         <template v-else-if="products.length">

@@ -41,18 +41,18 @@
           <h2 class="mb-[18px] flex items-center gap-3 text-[21px] font-bold">
             <span class="h-6 w-[5px] flex-none rounded-full bg-primary"></span>{{ t('blog.relatedProducts') }}
           </h2>
-          <div class="grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+          <div class="flex flex-wrap items-start gap-3.5">
             <RouterLink
               v-for="rp in relatedProducts"
               :key="rp.id"
               :to="`/products/${rp.slug}`"
-              class="flex items-center gap-3.5 rounded-md border bg-secondary p-3 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow)]"
+              class="flex min-w-0 max-w-full items-center gap-3.5 rounded-md border bg-secondary p-3 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow)]"
             >
-              <div v-if="rp.image" class="h-14 w-14 flex-none overflow-hidden rounded-sm">
-                <img :src="getImageUrl(rp.image)" :alt="getLocalizedText(rp.title)" loading="lazy" class="h-full w-full object-cover" />
+              <div v-if="rp.image" class="relative aspect-[8/5] w-24 flex-none overflow-hidden rounded-sm bg-muted sm:w-32">
+                <SmartImage :src="getImageUrl(rp.image)" :alt="getLocalizedText(rp.title)" img-class="absolute inset-0 h-full w-full object-contain" />
               </div>
-              <div class="min-w-0">
-                <div class="truncate font-bold">{{ getLocalizedText(rp.title) }}</div>
+              <div class="min-w-0 max-w-48 break-words">
+                <div class="line-clamp-2 font-bold">{{ getLocalizedText(rp.title) }}</div>
                 <div class="mt-1 text-[13px] font-semibold text-primary">{{ formatPrice(rp.price_amount) }}</div>
               </div>
             </RouterLink>
@@ -79,6 +79,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../../components/SmartImage.vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, AlertCircle, ChevronRight } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'

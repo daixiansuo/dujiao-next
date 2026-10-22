@@ -7,7 +7,7 @@
         <div class="h-5 w-48 rounded theme-skeleton"></div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-0 bg-card border rounded-3xl overflow-hidden">
           <div class="p-4 md:p-8 bg-secondary border-r">
-            <div class="h-[300px] md:h-[500px] rounded-xl theme-skeleton"></div>
+            <div class="aspect-[8/5] w-full rounded-xl theme-skeleton"></div>
             <div class="mt-4 flex gap-3 overflow-hidden">
               <div v-for="i in 4" :key="i" class="w-16 h-16 rounded-lg theme-skeleton shrink-0"></div>
             </div>

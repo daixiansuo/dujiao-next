@@ -66,20 +66,20 @@
               <span class="w-1.5 h-7 bg-primary rounded-full"></span>
               {{ t('blog.relatedProducts') }}
             </h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div class="flex flex-wrap items-start gap-5">
               <router-link
                 v-for="rp in relatedProducts"
                 :key="rp.id"
                 :to="`/products/${rp.slug}`"
-                class="group flex items-center gap-4 bg-card backdrop-blur-md border rounded-2xl p-4 hover:shadow-xl hover:-translate-y-0.5 transition-all"
+                class="group flex min-w-0 max-w-full items-center gap-4 bg-card backdrop-blur-md border rounded-2xl p-4 hover:shadow-xl hover:-translate-y-0.5 transition-all"
               >
                 <div v-if="rp.image"
-                  class="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-muted">
-                  <img :src="getImageUrl(rp.image)" :alt="getLocalizedText(rp.title)" loading="lazy"
-                    class="h-full w-full object-cover transition-transform group-hover:scale-110" />
+                  class="relative aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32">
+                  <SmartImage :src="getImageUrl(rp.image)" :alt="getLocalizedText(rp.title)"
+                    img-class="absolute inset-0 h-full w-full object-contain" />
                 </div>
-                <div class="min-w-0 flex-1">
-                  <div class="font-semibold text-foreground truncate">{{ getLocalizedText(rp.title) }}</div>
+                <div class="min-w-0 max-w-48 break-words">
+                  <div class="line-clamp-2 font-semibold text-foreground">{{ getLocalizedText(rp.title) }}</div>
                   <div class="mt-1 font-mono text-sm text-muted-foreground">
                     {{ formatPrice(rp.price_amount) }}
                   </div>
@@ -116,6 +116,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../components/SmartImage.vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, AlertCircle } from 'lucide-vue-next'
 import { getImageUrl } from '../utils/image'

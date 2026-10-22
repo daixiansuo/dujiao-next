@@ -87,21 +87,21 @@
                 <div v-if="child.items && child.items.length" class="space-y-3">
                   <div v-for="(item, cidx) in child.items" :key="cidx"
                     class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 border-b border-gray-100 pb-3 text-sm text-muted-foreground dark:border-white/5">
-                    <div class="flex min-w-0 items-start gap-3">
-                      <div class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm dark:border-white/10 dark:bg-black/30 sm:h-16 sm:w-16">
-                        <img
-                          v-if="orderItemImage(item)"
+                    <div class="flex min-w-0 flex-1 flex-wrap items-start gap-3">
+                      <div class="relative aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm dark:border-white/10 dark:bg-black/30 sm:w-32">
+                        <SmartImage
                           :src="orderItemImage(item)"
                           :alt="getLocalizedText(item.title)"
-                          loading="lazy"
-                          decoding="async"
-                          class="h-full w-full object-cover"
-                        />
-                        <div v-else class="flex h-full w-full items-center justify-center text-gray-400 dark:text-gray-500">
-                          <ImageIcon class="h-5 w-5" :stroke-width="1.5" />
-                        </div>
+                          img-class="absolute inset-0 h-full w-full object-contain"
+                        >
+                          <template #fallback>
+                            <div class="flex h-full w-full items-center justify-center text-gray-400 dark:text-gray-500">
+                              <ImageIcon class="h-5 w-5" :stroke-width="1.5" />
+                            </div>
+                          </template>
+                        </SmartImage>
                       </div>
-                      <div class="min-w-0">
+                      <div class="min-w-0 flex-1 basis-[120px] break-words">
                         <div class="text-foreground font-medium">{{ getLocalizedText(item.title) }}</div>
                         <div class="text-xs text-muted-foreground">{{ t('orderDetail.quantityLabel') }}：{{ item.quantity }}</div>
                         <div v-if="orderItemSkuText(item)" class="text-xs text-muted-foreground mt-1">{{ t('orderDetail.itemSkuLabel') }}：{{ orderItemSkuText(item) }}</div>
@@ -120,7 +120,7 @@
                         </div>
                       </div>
                     </div>
-                    <div class="shrink-0 pl-[4.25rem] sm:pl-0 text-left sm:text-right text-sm text-muted-foreground space-y-1">
+                    <div class="shrink-0 text-left sm:text-right text-sm text-muted-foreground space-y-1">
                       <div>{{ t('orderDetail.unitPriceLabel') }}：{{ formatMoney(item.original_unit_price, order.currency) }}
                       </div>
                       <div>{{ t('orderDetail.totalPriceLabel') }}：{{ formatMoney(item.original_total_price, order.currency) }}
@@ -266,21 +266,21 @@
           <div v-if="order.items && order.items.length > 0" class="space-y-4">
             <div v-for="(item, idx) in order.items" :key="idx"
               class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 border-b border-gray-100 pb-3 dark:border-white/5">
-              <div class="flex min-w-0 items-start gap-3">
-                <div class="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm dark:border-white/10 dark:bg-black/30 sm:h-16 sm:w-16">
-                  <img
-                    v-if="orderItemImage(item)"
+              <div class="flex min-w-0 flex-1 flex-wrap items-start gap-3">
+                <div class="relative aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm dark:border-white/10 dark:bg-black/30 sm:w-32">
+                  <SmartImage
                     :src="orderItemImage(item)"
                     :alt="getLocalizedText(item.title)"
-                    loading="lazy"
-                    decoding="async"
-                    class="h-full w-full object-cover"
-                  />
-                  <div v-else class="flex h-full w-full items-center justify-center text-gray-400 dark:text-gray-500">
-                    <ImageIcon class="h-5 w-5" :stroke-width="1.5" />
-                  </div>
+                    img-class="absolute inset-0 h-full w-full object-contain"
+                  >
+                    <template #fallback>
+                      <div class="flex h-full w-full items-center justify-center text-gray-400 dark:text-gray-500">
+                        <ImageIcon class="h-5 w-5" :stroke-width="1.5" />
+                      </div>
+                    </template>
+                  </SmartImage>
                 </div>
-                <div class="min-w-0">
+                <div class="min-w-0 flex-1 basis-[120px] break-words">
                   <div class="text-foreground font-medium">{{ getLocalizedText(item.title) }}</div>
                   <div class="text-xs text-muted-foreground">{{ t('orderDetail.quantityLabel') }}：{{ item.quantity }}</div>
                   <div v-if="orderItemSkuText(item)" class="text-xs text-muted-foreground mt-1">{{ t('orderDetail.itemSkuLabel') }}：{{ orderItemSkuText(item) }}</div>
@@ -299,7 +299,7 @@
                   </div>
                 </div>
               </div>
-              <div class="shrink-0 pl-[4.25rem] sm:pl-0 text-left sm:text-right text-sm text-muted-foreground space-y-1">
+              <div class="shrink-0 text-left sm:text-right text-sm text-muted-foreground space-y-1">
                 <div>{{ t('orderDetail.unitPriceLabel') }}：{{ formatMoney(item.original_unit_price, order.currency) }}</div>
                 <div>{{ t('orderDetail.totalPriceLabel') }}：{{ formatMoney(item.original_total_price, order.currency) }}</div>
                 <div v-if="hasDiscountAmount(item.coupon_discount_amount)">
@@ -417,6 +417,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../components/SmartImage.vue'
 import { Copy, Check, Download, Info, Image as ImageIcon } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { Alert, AlertDescription } from '@/components/ui/alert'

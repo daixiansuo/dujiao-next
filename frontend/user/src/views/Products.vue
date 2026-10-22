@@ -30,7 +30,7 @@
           <div v-if="loading" class="grid grid-cols-2 gap-3 md:gap-4 md:grid-cols-3 lg:grid-cols-4">
             <div v-for="i in 6" :key="i"
               class="rounded-2xl border bg-card overflow-hidden flex flex-col">
-              <div class="h-36 md:h-56 theme-skeleton"></div>
+              <div class="aspect-[8/5] w-full theme-skeleton"></div>
               <div class="p-3 md:p-5 space-y-3">
                 <div class="h-3 w-16 rounded theme-skeleton"></div>
                 <div class="h-5 w-3/4 rounded theme-skeleton"></div>

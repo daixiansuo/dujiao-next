@@ -3,26 +3,30 @@
     <div class="mb-4 md:mb-6 relative group"
       @touchstart="onImageTouchStart"
       @touchend="onImageTouchEnd">
-      <img v-if="currentImage" :src="currentImage" :alt="productTitle"
-        class="w-full aspect-[4/3] object-cover rounded-xl border relative z-10 shadow-lg" />
-      <div v-else
-        class="w-full aspect-[4/3] bg-muted rounded-xl border flex items-center justify-center relative z-10">
-        <ImageIcon class="w-24 h-24 text-muted-foreground" :stroke-width="1.5" />
+      <div class="w-full aspect-[8/5] bg-muted rounded-xl border relative z-10 shadow-lg overflow-hidden">
+        <SmartImage :src="currentImage" :alt="productTitle" loading="eager" img-class="w-full h-full object-contain">
+          <template #fallback>
+            <div class="w-full h-full flex items-center justify-center">
+              <ImageIcon class="w-24 h-24 text-muted-foreground" :stroke-width="1.5" />
+            </div>
+          </template>
+        </SmartImage>
       </div>
     </div>
 
     <!-- Thumbnail Gallery: horizontal scroll on mobile, grid on desktop -->
     <div v-if="images.length > 1" class="flex md:grid md:grid-cols-5 gap-3 overflow-x-auto md:overflow-visible pb-2 md:pb-0 -mx-1 px-1 snap-x snap-mandatory">
       <div v-for="(image, index) in images" :key="index" @click="$emit('update:currentImage', image)"
-        class="cursor-pointer rounded-lg overflow-hidden border-2 transition-all duration-300 shrink-0 w-16 h-16 md:w-auto md:h-auto md:aspect-square snap-start"
-        :class="currentImage === image ? 'border-primary ring-1 ring-primary/40 opacity-100' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'">
-        <img :src="image" :alt="`Image ${index + 1}`" loading="lazy" class="w-full h-full object-cover" />
+        class="cursor-pointer rounded-lg overflow-hidden border-2 bg-muted transition-all duration-300 shrink-0 w-16 h-16 md:w-auto md:h-auto md:aspect-square snap-start"
+        :class="currentImage === image ? 'border-primary ring-1 ring-primary/40 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'">
+        <SmartImage :src="image" :alt="`${productTitle} ${index + 1}`" img-class="w-full h-full object-contain" />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../SmartImage.vue'
 import { Image as ImageIcon } from 'lucide-vue-next'
 
 const props = defineProps<{
