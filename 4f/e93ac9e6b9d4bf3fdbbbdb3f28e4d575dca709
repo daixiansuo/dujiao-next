@@ -1,0 +1,46 @@
+internal/persistence/integrationtest/postgres_product_images_test.go
+  s_1d73d8d2864133::t_efb9f9d0cf7af4 1-33,35-79,81-121,123-138
+  s_1d73d8d2864133::t_a07e50d14d89c7 34,80,122
+frontend/admin/src/views/admin/Products.vue
+  s_1d73d8d2864133::t_de801aaf1e03b7 22-23,62-111,659,840-864
+internal/modules/catalog/mapping/application/sync.go
+  s_1d73d8d2864133::t_5b07e92ce28f53 90-93,281-284,652-655
+internal/authz/product_batch_images_test.go
+  s_1d73d8d2864133::t_20d91ae57691ab 1-35
+frontend/admin/src/views/admin/Products.test.ts
+  s_1d73d8d2864133::t_7580d2c531ec06 1-431
+frontend/admin/src/i18n/index.ts
+  s_1d73d8d2864133::t_de801aaf1e03b7 1737-1741,6399-6403,11061-11065
+internal/modules/catalog/product/integrationtest/transport/admin_http_test.go
+  s_1d73d8d2864133::t_20d91ae57691ab 511-715,718-805
+  s_1d73d8d2864133::t_862bc2318bdb30 9,28,41
+internal/modules/catalog/product/transport/http/admin_handler.go
+  s_1d73d8d2864133::t_862bc2318bdb30 19,661-666,738-753
+frontend/admin/src/api/admin.ts
+  s_1d73d8d2864133::t_de801aaf1e03b7 373
+frontend/admin/src/components/admin/MediaPicker.vue
+  s_1d73d8d2864133::t_e26ffcf719ae86 112,139,209,381,489-490
+  s_1d73d8d2864133::t_de801aaf1e03b7 279
+internal/modules/catalog/mapping/application/service.go
+  s_1d73d8d2864133::t_5b07e92ce28f53 113,117-118,120
+internal/modules/catalog/mapping/application/markup.go
+  s_1d73d8d2864133::t_5b07e92ce28f53 75-81
+internal/modules/catalog/product/transport/http/routes.go
+  s_1d73d8d2864133::t_862bc2318bdb30 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "4fe93ac9e6b9d4bf3fdbbbdb3f28e4d575dca709",
+  "prompts": {},
+  "sessions": {
+    "s_1d73d8d2864133": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15443-8ef8-7801-b43b-742a96245742",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
