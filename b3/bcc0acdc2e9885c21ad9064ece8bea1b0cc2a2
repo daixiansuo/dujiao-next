@@ -1,0 +1,75 @@
+internal/constants/constants.go
+  s_564025c7083ebe::t_368fbfc054b861 442
+frontend/admin/src/i18n/index.ts
+  s_564025c7083ebe::t_be06d619899d99 271,293-296,4938,4960-4963,9605,9627-9630
+frontend/admin/src/api/types.ts
+  s_564025c7083ebe::t_be06d619899d99 574-575
+internal/modules/siteconnection/domain/connection.go
+  s_564025c7083ebe::t_7524dc02f3518d 13-34
+internal/modules/catalog/mapping/application/pricing.go
+  s_564025c7083ebe::t_7bf3fa989542eb 27,29-30
+internal/modules/catalog/mapping/application/sync.go
+  s_564025c7083ebe::t_77c43097a1e1c1 187,748
+  s_564025c7083ebe::t_7bf3fa989542eb 158,177,249,716,738
+  s_564025c7083ebe::t_f97cf8b106d971 200,760
+internal/modules/catalog/mapping/application/pricing_test.go
+  s_564025c7083ebe::t_1fb8d917d1fc8b 119-158
+  s_564025c7083ebe::t_1842870fbe4a91 189-190,203,205-206
+  s_564025c7083ebe::t_7bf3fa989542eb 79,104,112
+internal/modules/catalog/mapping/application/import_test.go
+  s_564025c7083ebe::t_7bf3fa989542eb 20,37,95,114
+  s_564025c7083ebe::t_1fb8d917d1fc8b 7-8,119-300
+frontend/admin/src/views/admin/SiteConnections.test.ts
+  s_564025c7083ebe::t_6a6baa926030d6 158
+  s_564025c7083ebe::t_9b8e4f70390dc8 95,119,122-157,159-237
+frontend/admin/src/views/admin/SiteConnections.vue
+  s_564025c7083ebe::t_be06d619899d99 42-43,105,146,176-179,181-184,332-335,461,465-469,474,509-512
+internal/modules/siteconnection/integrationtest/admin_http_test.go
+  s_564025c7083ebe::t_7524dc02f3518d 66-75,83,88,95,102
+internal/i18n/messages.go
+  s_564025c7083ebe::t_7524dc02f3518d 387,773,1159
+internal/modules/siteconnection/application/types.go
+  s_564025c7083ebe::t_368fbfc054b861 18,37
+  s_564025c7083ebe::t_7524dc02f3518d 7-17,19-21,26-36,38-40
+internal/modules/catalog/mapping/application/markup.go
+  s_564025c7083ebe::t_7bf3fa989542eb 36
+  s_564025c7083ebe::t_1842870fbe4a91 60,71-92
+internal/modules/catalog/mapping/contract/repository.go
+  s_564025c7083ebe::t_f97cf8b106d971 89
+  s_564025c7083ebe::t_77c43097a1e1c1 78
+internal/modules/siteconnection/application/service.go
+  s_564025c7083ebe::t_22cca75c1f99fc 56,97,101,103-104,130,174-176,191-193,202-203,205-207,229,236-247
+  s_564025c7083ebe::t_7524dc02f3518d 85-96,98-100
+internal/modules/siteconnection/infrastructure/gormstore/store_test.go
+  s_564025c7083ebe::t_7524dc02f3518d 138,144,155,163-166,176,179-182,186-188,190-198
+internal/modules/siteconnection/integrationtest/service_test.go
+  s_564025c7083ebe::t_9b8e4f70390dc8 229-234,261-264,266-287,291,295-302,306-315,319-327
+  s_564025c7083ebe::t_7524dc02f3518d 265,288-290,292-294,303-305,316-318
+internal/modules/catalog/mapping/application/import.go
+  s_564025c7083ebe::t_7bf3fa989542eb 134,153,200,251,438
+  s_564025c7083ebe::t_f97cf8b106d971 320-332,375
+  s_564025c7083ebe::t_1842870fbe4a91 232-244
+  s_564025c7083ebe::t_77c43097a1e1c1 210,307-319
+  s_564025c7083ebe::t_96ac80e5bdd14f 458-461,490-529
+internal/bootstrap/catalogmapping/pricing_test.go
+  s_564025c7083ebe::t_2f697c6ccc103d 485-491
+  s_564025c7083ebe::t_7460031c2b2ac8 26,53,84-86,137-171
+  s_564025c7083ebe::t_718ccf1c2d4b9a 524
+  s_564025c7083ebe::t_3da18c1357f6ce 422-484,492-523,525-540,563,565,567-591,594-595,598-599,601-602,605-606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "b3bcc0acdc2e9885c21ad9064ece8bea1b0cc2a2",
+  "prompts": {},
+  "sessions": {
+    "s_564025c7083ebe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a163e3-8b0f-7fb1-a14e-585796d88be3",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
