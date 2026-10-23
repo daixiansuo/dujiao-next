@@ -135,13 +135,13 @@ func testConnectionMarkupMigration(t *testing.T, db *gorm.DB) {
 		t.Fatal(err)
 	}
 	// Recreate the pre-feature schema with existing percentage configuration.
-	for _, column := range []string{"price_markup_mode", "price_markup_amount"} {
+	for _, column := range []string{"price_markup_mode", "price_markup_amount", "price_markup_threshold"} {
 		if err := db.Migrator().DropColumn(&siteconnectiondomain.Connection{}, column); err != nil {
 			t.Fatal(err)
 		}
 	}
 	legacy := &siteconnectiondomain.Connection{Name: "legacy", BaseURL: "https://example.com", ApiKey: "key", ApiSecret: "encrypted", ExchangeRate: decimal.RequireFromString("7.2"), PriceMarkupPercent: decimal.NewFromInt(40)}
-	if err := db.Omit("PriceMarkupMode", "PriceMarkupAmount").Create(legacy).Error; err != nil {
+	if err := db.Omit("PriceMarkupMode", "PriceMarkupAmount", "PriceMarkupThreshold").Create(legacy).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&siteconnectiondomain.Connection{}); err != nil {
@@ -152,12 +152,16 @@ func testConnectionMarkupMigration(t *testing.T, db *gorm.DB) {
 	if err != nil || conn == nil {
 		t.Fatalf("get migrated connection: %v, %+v", err, conn)
 	}
-	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupPercent || !conn.PriceMarkupAmount.IsZero() || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) || !conn.ExchangeRate.Equal(legacy.ExchangeRate) {
+	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupPercent || !conn.PriceMarkupAmount.IsZero() || !conn.PriceMarkupThreshold.IsZero() || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) || !conn.ExchangeRate.Equal(legacy.ExchangeRate) {
 		t.Fatalf("migration lost pricing: %+v", conn)
 	}
 	conn.PriceMarkupMode = constants.ConnectionPriceMarkupFixedAmount
 	conn.PriceMarkupAmount = money.FromDecimal(decimal.RequireFromString("3.25"))
 	if err := store.Update(conn); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate upgrading an existing fixed-mode connection from before segmented markup.
+	if err := db.Migrator().DropColumn(&siteconnectiondomain.Connection{}, "price_markup_threshold"); err != nil {
 		t.Fatal(err)
 	}
 	// Startup migration is repeatable and preserves both active and inactive values.
@@ -169,15 +173,29 @@ func testConnectionMarkupMigration(t *testing.T, db *gorm.DB) {
 		t.Fatalf("list: %v, %d, %+v", err, total, rows)
 	}
 	conn = &rows[0]
-	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupFixedAmount || conn.PriceMarkupAmount.String() != "3.25" || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) {
+	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupFixedAmount || conn.PriceMarkupAmount.String() != "3.25" || !conn.PriceMarkupThreshold.IsZero() || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) {
 		t.Fatalf("save/list lost pricing: %+v", conn)
+	}
+	conn.PriceMarkupMode = constants.ConnectionPriceMarkupSegmented
+	conn.PriceMarkupThreshold = money.FromDecimal(decimal.NewFromInt(15))
+	conn.PriceMarkupAmount = money.FromDecimal(decimal.NewFromInt(5))
+	conn.PriceMarkupPercent = decimal.NewFromInt(30)
+	if err := store.Update(conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&siteconnectiondomain.Connection{}); err != nil {
+		t.Fatal(err)
+	}
+	reread, err := store.GetByID(conn.ID)
+	if err != nil || reread == nil || reread.PriceMarkupMode != constants.ConnectionPriceMarkupSegmented || reread.PriceMarkupThreshold.String() != "15.00" || reread.PriceMarkupAmount.String() != "5.00" || !reread.PriceMarkupPercent.Equal(decimal.NewFromInt(30)) {
+		t.Fatalf("segmented migration/save lost pricing: %v, %+v", err, reread)
 	}
 	conn.PriceMarkupAmount = money.FromDecimal(decimal.Zero)
 	if err := store.Update(conn); err != nil {
 		t.Fatal(err)
 	}
-	reread, err := store.GetByID(conn.ID)
-	if err != nil || reread == nil || !reread.PriceMarkupAmount.IsZero() {
+	reread, err = store.GetByID(conn.ID)
+	if err != nil || reread == nil || !reread.PriceMarkupAmount.IsZero() || reread.PriceMarkupThreshold.String() != "15.00" {
 		t.Fatalf("zero not persisted: %v, %+v", err, reread)
 	}
 }

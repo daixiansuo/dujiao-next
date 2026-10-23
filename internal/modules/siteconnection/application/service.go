@@ -53,7 +53,7 @@ func (s *Service) Create(input CreateInput) (*siteconnectiondomain.Connection, e
 	}
 
 	markupMode, err := normalizePriceMarkupMode(input.PriceMarkupMode)
-	if err != nil || input.PriceMarkupAmount.IsNegative() {
+	if err != nil {
 		return nil, siteconnectioncontract.ErrInvalid
 	}
 
@@ -82,23 +82,27 @@ func (s *Service) Create(input CreateInput) (*siteconnectiondomain.Connection, e
 	}
 
 	conn := &siteconnectiondomain.Connection{
-		Name:               strings.TrimSpace(input.Name),
-		BaseURL:            strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"),
-		ApiKey:             strings.TrimSpace(input.ApiKey),
-		ApiSecret:          encryptedSecret,
-		Protocol:           protocol,
-		CallbackURL:        strings.TrimSpace(input.CallbackURL),
-		Status:             constants.ConnectionStatusPending,
-		RetryMax:           retryMax,
-		RetryIntervals:     retryIntervals,
-		ExchangeRate:       s.normalizeExchangeRate(input.ExchangeRate),
-		PriceMarkupMode:    markupMode,
-		PriceMarkupAmount:  input.PriceMarkupAmount,
-		PriceMarkupPercent: decimal.NewFromFloat(input.PriceMarkupPercent),
-		PriceRoundingMode:  roundingMode,
-		AutoSyncPrice:      input.AutoSyncPrice,
+		Name:                 strings.TrimSpace(input.Name),
+		BaseURL:              strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"),
+		ApiKey:               strings.TrimSpace(input.ApiKey),
+		ApiSecret:            encryptedSecret,
+		Protocol:             protocol,
+		CallbackURL:          strings.TrimSpace(input.CallbackURL),
+		Status:               constants.ConnectionStatusPending,
+		RetryMax:             retryMax,
+		RetryIntervals:       retryIntervals,
+		ExchangeRate:         s.normalizeExchangeRate(input.ExchangeRate),
+		PriceMarkupMode:      markupMode,
+		PriceMarkupAmount:    input.PriceMarkupAmount,
+		PriceMarkupThreshold: input.PriceMarkupThreshold,
+		PriceMarkupPercent:   decimal.NewFromFloat(input.PriceMarkupPercent),
+		PriceRoundingMode:    roundingMode,
+		AutoSyncPrice:        input.AutoSyncPrice,
 	}
 
+	if err := validatePriceMarkup(conn); err != nil {
+		return nil, err
+	}
 	if err := s.connRepo.Create(conn); err != nil {
 		return nil, err
 	}
@@ -123,6 +127,7 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 	}
 	prevMarkupPercent := conn.PriceMarkupPercent
 	prevMarkupAmount := conn.PriceMarkupAmount
+	prevMarkupThreshold := conn.PriceMarkupThreshold
 	conn.PriceMarkupMode = prevMarkupMode
 	prevRoundingMode := conn.PriceRoundingMode
 
@@ -164,10 +169,10 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 		}
 	}
 	if input.PriceMarkupAmount != nil {
-		if input.PriceMarkupAmount.IsNegative() {
-			return nil, siteconnectioncontract.ErrInvalid
-		}
 		conn.PriceMarkupAmount = *input.PriceMarkupAmount
+	}
+	if input.PriceMarkupThreshold != nil {
+		conn.PriceMarkupThreshold = *input.PriceMarkupThreshold
 	}
 	if input.PriceMarkupPercent != nil {
 		conn.PriceMarkupPercent = decimal.NewFromFloat(*input.PriceMarkupPercent)
@@ -183,6 +188,9 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 		conn.AutoSyncPrice = *input.AutoSyncPrice
 	}
 
+	if err := validatePriceMarkup(conn); err != nil {
+		return nil, err
+	}
 	if err := s.connRepo.Update(conn); err != nil {
 		return nil, err
 	}
@@ -191,8 +199,12 @@ func (s *Service) Update(id uint, input UpdateInput) (*siteconnectiondomain.Conn
 	// 避免「改了汇率但已有商品价格不联动」。重算为尽力而为：失败不影响连接保存本身，
 	// 仅记录告警，用户仍可通过「重新应用加价」手动补救。
 	markupChanged := !conn.PriceMarkupPercent.Equal(prevMarkupPercent)
-	if conn.PriceMarkupMode == constants.ConnectionPriceMarkupFixedAmount {
+	switch conn.PriceMarkupMode {
+	case constants.ConnectionPriceMarkupFixedAmount:
 		markupChanged = !conn.PriceMarkupAmount.Equal(prevMarkupAmount.Decimal)
+	case constants.ConnectionPriceMarkupSegmented:
+		markupChanged = markupChanged || !conn.PriceMarkupAmount.Equal(prevMarkupAmount.Decimal) ||
+			!conn.PriceMarkupThreshold.Equal(prevMarkupThreshold.Decimal)
 	}
 	priceConfigChanged := !conn.ExchangeRate.Equal(prevExchangeRate) ||
 		conn.PriceMarkupMode != prevMarkupMode || markupChanged ||
@@ -214,11 +226,23 @@ func normalizePriceMarkupMode(mode string) (string, error) {
 		mode = constants.ConnectionPriceMarkupPercent
 	}
 	switch mode {
-	case constants.ConnectionPriceMarkupPercent, constants.ConnectionPriceMarkupFixedAmount:
+	case constants.ConnectionPriceMarkupPercent, constants.ConnectionPriceMarkupFixedAmount, constants.ConnectionPriceMarkupSegmented:
 		return mode, nil
 	default:
 		return "", siteconnectioncontract.ErrInvalid
 	}
+}
+
+// validatePriceMarkup 在合并更新后校验最终配置，旧模式不使用分界价。
+func validatePriceMarkup(conn *siteconnectiondomain.Connection) error {
+	if conn.PriceMarkupAmount.IsNegative() {
+		return siteconnectioncontract.ErrInvalid
+	}
+	if conn.PriceMarkupMode == constants.ConnectionPriceMarkupSegmented &&
+		(conn.PriceMarkupThreshold.LessThanOrEqual(decimal.Zero) || conn.PriceMarkupPercent.IsNegative()) {
+		return siteconnectioncontract.ErrInvalid
+	}
+	return nil
 }
 
 // Delete 删除连接

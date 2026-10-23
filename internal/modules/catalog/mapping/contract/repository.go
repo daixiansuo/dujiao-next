@@ -75,6 +75,7 @@ type ImportTxProductRepository interface {
 // ImportTxSKURepository 是导入事务内的本地 SKU 写入端口。
 type ImportTxSKURepository interface {
 	Create(item *productdomain.ProductSKU) error
+	Update(item *productdomain.ProductSKU) error
 }
 
 // ImportTxMappingRepository 是导入事务内的映射写入端口。
@@ -85,6 +86,7 @@ type ImportTxMappingRepository interface {
 // ImportTxSKUMappingRepository 是导入事务内的 SKU 映射写入端口。
 type ImportTxSKUMappingRepository interface {
 	Create(mapping *mappingdomain.SKUMapping) error
+	Update(mapping *mappingdomain.SKUMapping) error
 }
 
 // ImportRepositories 是一次上游商品导入事务中绑定的全部窄端口。

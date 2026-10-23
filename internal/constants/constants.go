@@ -439,6 +439,7 @@ const (
 const (
 	ConnectionPriceMarkupPercent     = "percent"
 	ConnectionPriceMarkupFixedAmount = "fixed_amount"
+	ConnectionPriceMarkupSegmented   = "segmented"
 )
 
 // API 凭证状态常量

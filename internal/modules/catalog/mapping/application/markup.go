@@ -33,7 +33,7 @@ func (s *Service) ReapplyMarkup(connectionID uint) (int, error) {
 		}
 
 		for _, sm := range skuMappings {
-			newLocalPrice := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
+			newLocalPrice := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupThreshold.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
 			localSKU, err := s.skus.GetByID(sm.LocalSKUID)
 			if err != nil || localSKU == nil {
 				continue
@@ -57,21 +57,9 @@ func (s *Service) ReapplyMarkup(connectionID uint) (int, error) {
 // recalcProductPrice 重新计算商品基准价格和成本价为最低活跃 SKU 价格
 func (s *Service) recalcProductPrice(product *productdomain.Product) {
 	allSKUs, err := s.skus.ListByProduct(product.ID, true)
-	if err != nil || len(allSKUs) == 0 {
+	if err != nil || !setMinActiveSKUPrices(product, allSKUs) {
 		return
 	}
-	minPrice := allSKUs[0].PriceAmount.Decimal
-	minCostPrice := allSKUs[0].CostPriceAmount.Decimal
-	for _, sku := range allSKUs[1:] {
-		if sku.PriceAmount.Decimal.LessThan(minPrice) {
-			minPrice = sku.PriceAmount.Decimal
-		}
-		if sku.CostPriceAmount.Decimal.LessThan(minCostPrice) {
-			minCostPrice = sku.CostPriceAmount.Decimal
-		}
-	}
-	product.PriceAmount = money.FromDecimal(minPrice.Round(2))
-	product.CostPriceAmount = money.FromDecimal(minCostPrice.Round(2))
 	_ = s.products.QuickUpdate(
 		strconv.FormatUint(uint64(product.ID), 10),
 		map[string]interface{}{
@@ -79,4 +67,26 @@ func (s *Service) recalcProductPrice(product *productdomain.Product) {
 			"cost_price_amount": product.CostPriceAmount,
 		},
 	)
+}
+
+// setMinActiveSKUPrices 从已加载的 SKU 汇总售价和成本，不进行数据库查询。
+func setMinActiveSKUPrices(product *productdomain.Product, skus []productdomain.ProductSKU) bool {
+	found := false
+	for _, sku := range skus {
+		if !sku.IsActive {
+			continue
+		}
+		if !found || sku.PriceAmount.LessThan(product.PriceAmount.Decimal) {
+			product.PriceAmount = sku.PriceAmount
+		}
+		if !found || sku.CostPriceAmount.LessThan(product.CostPriceAmount.Decimal) {
+			product.CostPriceAmount = sku.CostPriceAmount
+		}
+		found = true
+	}
+	if found {
+		product.PriceAmount = money.FromDecimal(product.PriceAmount.Round(2))
+		product.CostPriceAmount = money.FromDecimal(product.CostPriceAmount.Round(2))
+	}
+	return found
 }

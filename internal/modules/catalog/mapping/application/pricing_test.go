@@ -76,7 +76,7 @@ func TestCalculateLocalPrice(t *testing.T) {
 			markup := decimal.RequireFromString(tt.markup)
 			expected := decimal.RequireFromString(tt.expected)
 
-			result := CalculateLocalPrice(upstream, rate, markup, decimal.Zero, "", tt.rounding)
+			result := CalculateLocalPrice(upstream, rate, markup, decimal.Zero, decimal.NewFromInt(15), "", tt.rounding)
 			if !result.Equal(expected) {
 				t.Errorf("CalculateLocalPrice(%s, rate=%s, %s%%, %s) = %s, want %s",
 					tt.upstream, tt.rate, tt.markup, tt.rounding, result.String(), tt.expected)
@@ -101,7 +101,7 @@ func TestCalculateFixedAmountPrice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CalculateLocalPrice(decimal.RequireFromString(tt.upstream), decimal.RequireFromString(tt.rate), decimal.NewFromInt(40), decimal.RequireFromString(tt.amount), constants.ConnectionPriceMarkupFixedAmount, tt.rounding)
+			got := CalculateLocalPrice(decimal.RequireFromString(tt.upstream), decimal.RequireFromString(tt.rate), decimal.NewFromInt(40), decimal.RequireFromString(tt.amount), decimal.NewFromInt(15), constants.ConnectionPriceMarkupFixedAmount, tt.rounding)
 			if !got.Equal(decimal.RequireFromString(tt.want)) {
 				t.Fatalf("got %s, want %s", got, tt.want)
 			}
@@ -109,10 +109,50 @@ func TestCalculateFixedAmountPrice(t *testing.T) {
 	}
 	// The saved value of the inactive mode must never affect the selected rule.
 	for _, mode := range []string{"", constants.ConnectionPriceMarkupPercent} {
-		got := CalculateLocalPrice(decimal.NewFromInt(5), decimal.NewFromInt(2), decimal.NewFromInt(40), decimal.NewFromInt(100), mode, "none")
+		got := CalculateLocalPrice(decimal.NewFromInt(5), decimal.NewFromInt(2), decimal.NewFromInt(40), decimal.NewFromInt(100), decimal.NewFromInt(15), mode, "none")
 		if !got.Equal(decimal.NewFromInt(14)) {
 			t.Fatalf("mode %q: got %s, want 14", mode, got)
 		}
+	}
+}
+
+func TestCalculateSegmentedPrice(t *testing.T) {
+	tests := []struct {
+		name, upstream, rate, percent, amount, rounding, want string
+	}{
+		{"below threshold uses fixed amount", "14", "1", "30", "5", "none", "19"},
+		{"threshold equality uses fixed amount", "15", "1", "30", "5", "none", "20"},
+		{"above threshold uses percentage", "15.01", "1", "30", "5", "none", "19.51"},
+		{"convert before threshold comparison", "10", "2", "30", "5", "none", "26"},
+		{"compare before rounding converted cost", "1", "15.004", "30", "5", "none", "19.51"},
+		{"converted cost equals threshold", "3", "5", "30", "5", "none", "20"},
+		{"fixed branch ceiling integer", "14.01", "1", "30", "5", "ceil_int", "20"},
+		{"fixed branch ceiling tenth", "14.01", "1", "30", "5", "ceil_tenth", "19.10"},
+		{"percentage branch ceiling integer", "15.01", "1", "30", "5", "ceil_int", "20"},
+		{"percentage branch ceiling tenth", "15.01", "1", "30", "5", "ceil_tenth", "19.60"},
+		{"zero fixed amount skips ceiling", "5.01", "1", "30", "0", "ceil_int", "5.01"},
+		{"zero fixed amount still converts", "1", "7.345", "30", "0", "ceil_tenth", "7.35"},
+		{"zero percentage skips ceiling", "15.01", "1", "0", "100", "ceil_int", "15.01"},
+		{"zero percentage still converts", "1", "15.345", "0", "100", "ceil_tenth", "15.35"},
+		{"zero upstream uses fixed branch", "0", "7.2", "30", "5", "none", "5"},
+		{"invalid rate retains fallback", "15", "0", "30", "5", "none", "20"},
+		{"negative rate retains fallback", "15.01", "-1", "30", "5", "none", "19.51"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CalculateLocalPrice(
+				decimal.RequireFromString(tt.upstream),
+				decimal.RequireFromString(tt.rate),
+				decimal.RequireFromString(tt.percent),
+				decimal.RequireFromString(tt.amount),
+				decimal.NewFromInt(15),
+				constants.ConnectionPriceMarkupSegmented,
+				tt.rounding,
+			)
+			if !got.Equal(decimal.RequireFromString(tt.want)) {
+				t.Fatalf("got %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -146,8 +186,8 @@ func TestRecalcProductPriceUpdatesOnlyIndependentMinimumPrices(t *testing.T) {
 		return money.FromDecimal(decimal.RequireFromString(value))
 	}
 	skus := []productdomain.ProductSKU{
-		{PriceAmount: amount("12.346"), CostPriceAmount: amount("9.871")},
-		{PriceAmount: amount("10.124"), CostPriceAmount: amount("11.286")},
+		{PriceAmount: amount("12.346"), CostPriceAmount: amount("9.871"), IsActive: true},
+		{PriceAmount: amount("10.124"), CostPriceAmount: amount("11.286"), IsActive: true},
 	}
 	writeErr := errors.New("product update failed")
 	for _, tc := range []struct {
@@ -160,8 +200,10 @@ func TestRecalcProductPriceUpdatesOnlyIndependentMinimumPrices(t *testing.T) {
 		wantCost   string
 	}{
 		{name: "independent minima rounded", skus: skus, wantUpdate: true, wantPrice: "10.12", wantCost: "9.87"},
-		{name: "zero prices", skus: []productdomain.ProductSKU{{PriceAmount: amount("0"), CostPriceAmount: amount("0")}}, wantUpdate: true, wantPrice: "0.00", wantCost: "0.00"},
+		{name: "zero prices", skus: []productdomain.ProductSKU{{PriceAmount: amount("0"), CostPriceAmount: amount("0"), IsActive: true}}, wantUpdate: true, wantPrice: "0.00", wantCost: "0.00"},
 		{name: "empty SKUs", wantPrice: "100.00", wantCost: "90.00"},
+		{name: "no active SKUs", skus: []productdomain.ProductSKU{{PriceAmount: amount("1"), CostPriceAmount: amount("1")}}, wantPrice: "100.00", wantCost: "90.00"},
+		{name: "ignore inactive SKU", skus: append(append([]productdomain.ProductSKU{}, skus...), productdomain.ProductSKU{PriceAmount: amount("1"), CostPriceAmount: amount("1")}), wantUpdate: true, wantPrice: "10.12", wantCost: "9.87"},
 		{name: "SKU query failure", skus: skus, listErr: errors.New("SKU query failed"), wantPrice: "100.00", wantCost: "90.00"},
 		{name: "update failure retains memory changes", skus: skus, updateErr: writeErr, wantUpdate: true, wantPrice: "10.12", wantCost: "9.87"},
 	} {

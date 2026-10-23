@@ -24,9 +24,10 @@ func convertCurrency(upstreamPrice, exchangeRate decimal.Decimal) decimal.Decima
 // CalculateLocalPrice 先按汇率转换，再应用加价和取整。
 // 计算链路：上游价格 × 汇率 → 加价 → 取整 → 本地售价。
 // exchangeRate 为 0 或负数时视为 1（同币种）。
-func CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount decimal.Decimal, markupMode, roundingMode string) decimal.Decimal {
+func CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount, markupThreshold decimal.Decimal, markupMode, roundingMode string) decimal.Decimal {
 	converted := convertCurrency(upstreamPrice, exchangeRate)
-	if markupMode == constants.ConnectionPriceMarkupFixedAmount {
+	if markupMode == constants.ConnectionPriceMarkupFixedAmount ||
+		(markupMode == constants.ConnectionPriceMarkupSegmented && converted.LessThanOrEqual(markupThreshold)) {
 		if markupAmount.IsZero() {
 			return converted.Round(roundScale)
 		}

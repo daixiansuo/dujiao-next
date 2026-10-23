@@ -131,6 +131,7 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 	exchangeRate := conn.ExchangeRate
 	markupPercent := conn.PriceMarkupPercent
 	markupAmount := conn.PriceMarkupAmount.Decimal
+	markupThreshold := conn.PriceMarkupThreshold.Decimal
 	markupMode := conn.PriceMarkupMode
 	roundingMode := conn.PriceRoundingMode
 
@@ -149,7 +150,7 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		}
 	}
 	costPriceAmount := convertCurrency(upstreamPrice, exchangeRate)
-	priceAmount := CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
+	priceAmount := CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
 
 	// 未指定 slug 时优先沿用上游 slug，不可用再回退自动生成
 	if slug == "" {
@@ -196,7 +197,7 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 			if skuPriceErr != nil {
 				return fmt.Errorf("parse upstream sku %d price: %w", upSKU.ID, skuPriceErr)
 			}
-			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
+			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
 			localSKU := productdomain.ProductSKU{
 				ProductID:       product.ID,
 				SKUCode:         upSKU.SKUCode,
@@ -206,7 +207,7 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 				IsActive:        upSKU.IsActive,
 				SortOrder:       0,
 			}
-			if err := repos.SKUs.Create(&localSKU); err != nil {
+			if err := createUpstreamSKU(repos.SKUs, &localSKU); err != nil {
 				return fmt.Errorf("create local sku: %w", err)
 			}
 			localSKUs = append(localSKUs, localSKU)
@@ -228,12 +229,26 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 			localSKUs = append(localSKUs, defaultSKU)
 		}
 
+		// 分段加价可能颠倒 SKU 售价高低，商品概要价需与最低启用 SKU 保持一致。
+		if markupMode == constants.ConnectionPriceMarkupSegmented && len(upProduct.SKUs) > 0 && setMinActiveSKUPrices(&product, localSKUs) {
+			if err := repos.Products.QuickUpdate(
+				fmt.Sprintf("%d", product.ID),
+				map[string]interface{}{
+					"price_amount":      product.PriceAmount,
+					"cost_price_amount": product.CostPriceAmount,
+				},
+			); err != nil {
+				return fmt.Errorf("update local product prices: %w", err)
+			}
+		}
+
 		if len(upProduct.WholesalePrices) > 0 {
 			wholesalePrices := convertUpstreamWholesalePrices(
 				upProduct.WholesalePrices,
 				exchangeRate,
 				markupPercent,
 				markupAmount,
+				markupThreshold,
 				markupMode,
 				roundingMode,
 				buildUpstreamWholesaleSKUIndex(localSKUs, upProduct.SKUs, nil),
@@ -289,6 +304,32 @@ func (s *Service) fetchUpstreamCategoryMap(ctx context.Context, adapter upstream
 	return catMap, nil
 }
 
+// createUpstreamSKU 保留上游显式的启用状态，避免创建时的默认值覆盖 false。
+func createUpstreamSKU(skus mappingcontract.ImportTxSKURepository, sku *productdomain.ProductSKU) error {
+	isActive := sku.IsActive
+	if err := skus.Create(sku); err != nil {
+		return err
+	}
+	if sku.IsActive != isActive {
+		sku.IsActive = isActive
+		return skus.Update(sku)
+	}
+	return nil
+}
+
+// createUpstreamSKUMapping 保留上游显式的启用状态，与对应本地 SKU 一致。
+func createUpstreamSKUMapping(skuMappings mappingcontract.ImportTxSKUMappingRepository, mapping *mappingdomain.SKUMapping) error {
+	isActive := mapping.UpstreamIsActive
+	if err := skuMappings.Create(mapping); err != nil {
+		return err
+	}
+	if mapping.UpstreamIsActive != isActive {
+		mapping.UpstreamIsActive = isActive
+		return skuMappings.Update(mapping)
+	}
+	return nil
+}
+
 func createSKUMappings(
 	skuMappings mappingcontract.ImportTxSKUMappingRepository,
 	mappingID uint,
@@ -331,7 +372,7 @@ func createSKUMappings(
 			UpstreamStock:    upSKU.StockQuantity,
 			StockSyncedAt:    &now,
 		}
-		if err := skuMappings.Create(skuMapping); err != nil {
+		if err := createUpstreamSKUMapping(skuMappings, skuMapping); err != nil {
 			return err
 		}
 	}
@@ -394,7 +435,7 @@ func buildUpstreamWholesaleSKUIndex(localSKUs []productdomain.ProductSKU, upstre
 	return index
 }
 
-func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exchangeRate, markupPercent, markupAmount decimal.Decimal, markupMode, roundingMode string, indexes ...upstreamWholesaleSKUIndex) productdomain.WholesalePriceTiers {
+func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exchangeRate, markupPercent, markupAmount, markupThreshold decimal.Decimal, markupMode, roundingMode string, indexes ...upstreamWholesaleSKUIndex) productdomain.WholesalePriceTiers {
 	if len(tiers) == 0 {
 		return productdomain.WholesalePriceTiers{}
 	}
@@ -414,7 +455,10 @@ func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exc
 			)
 			continue
 		}
-		localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
+		localPrice := tier.UnitPrice.Decimal
+		if markupMode != constants.ConnectionPriceMarkupSegmented {
+			localPrice = CalculateLocalPrice(localPrice, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
+		}
 		if localPrice.LessThanOrEqual(decimal.Zero) {
 			skipped++
 			logger.Warnw("convert_upstream_wholesale_price_invalid",
@@ -442,6 +486,46 @@ func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exc
 			MinQuantity: tier.MinQuantity,
 			UnitPrice:   localPrice,
 		})
+	}
+	if markupMode == constants.ConnectionPriceMarkupSegmented {
+		// 先校验、排序映射后的成本阶梯，避免省略加价后的冗余档位掩盖上游数据错误。
+		sourceTiers, err := productdomain.NormalizeWholesalePrices(converted)
+		if err != nil {
+			logger.Warnw("convert_upstream_wholesale_prices_failed",
+				"error", err,
+				"tier_count", len(tiers),
+				"valid_tier_count", len(converted),
+				"skipped_tier_count", skipped,
+			)
+			return productdomain.WholesalePriceTiers{}
+		}
+		converted = converted[:0]
+		for idx, tier := range sourceTiers {
+			localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
+			if localPrice.LessThanOrEqual(decimal.Zero) {
+				skipped++
+				logger.Warnw("convert_upstream_wholesale_price_invalid",
+					"index", idx,
+					"min_quantity", tier.MinQuantity,
+					"unit_price", tier.UnitPrice.String(),
+					"local_price", localPrice.String(),
+				)
+				continue
+			}
+			if len(converted) > 0 {
+				previous := converted[len(converted)-1]
+				sameScope := strings.EqualFold(previous.SKUCode, tier.SKUCode) && (tier.SKUCode != "" || previous.SKUID == tier.SKUID)
+				if sameScope && localPrice.GreaterThanOrEqual(previous.UnitPrice) {
+					continue
+				}
+			}
+			converted = append(converted, productdomain.WholesalePriceInput{
+				SKUID:       tier.SKUID,
+				SKUCode:     tier.SKUCode,
+				MinQuantity: tier.MinQuantity,
+				UnitPrice:   localPrice,
+			})
+		}
 	}
 	normalized, err := productdomain.NormalizeWholesalePrices(converted)
 	if err != nil {

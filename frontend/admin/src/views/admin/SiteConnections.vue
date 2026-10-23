@@ -39,7 +39,8 @@ const form = reactive({
   retry_max: 3,
   retry_intervals: '30,60,120',
   exchange_rate: 1,
-  price_markup_mode: 'percent' as 'percent' | 'fixed_amount',
+  price_markup_mode: 'percent' as NonNullable<AdminSiteConnection['price_markup_mode']>,
+  price_markup_threshold: '0.00',
   price_markup_amount: '0.00',
   price_markup_percent: 0,
   price_rounding_mode: 'none',
@@ -101,6 +102,7 @@ const resetForm = () => {
     retry_intervals: '30,60,120',
     exchange_rate: 1,
     price_markup_mode: 'percent',
+    price_markup_threshold: '0.00',
     price_markup_amount: '0.00',
     price_markup_percent: 0,
     price_rounding_mode: 'none',
@@ -141,6 +143,7 @@ const openEditModal = (conn: AdminSiteConnection) => {
     })(),
     exchange_rate: conn.exchange_rate ?? 1,
     price_markup_mode: conn.price_markup_mode || 'percent',
+    price_markup_threshold: String(conn.price_markup_threshold ?? '0.00'),
     price_markup_amount: String(conn.price_markup_amount ?? '0.00'),
     price_markup_percent: conn.price_markup_percent ?? 0,
     price_rounding_mode: conn.price_rounding_mode || 'none',
@@ -170,9 +173,15 @@ const buildPayload = () => {
     retry_intervals: JSON.stringify(intervals),
     exchange_rate: Number(form.exchange_rate) || 1,
     price_markup_mode: form.price_markup_mode,
-    ...(form.price_markup_mode === 'fixed_amount'
+    ...(form.price_markup_mode === 'segmented'
+      ? { price_markup_threshold: String(form.price_markup_threshold) }
+      : {}),
+    ...(form.price_markup_mode !== 'percent'
       ? { price_markup_amount: String(form.price_markup_amount) }
-      : { price_markup_percent: Number(form.price_markup_percent) || 0 }),
+      : {}),
+    ...(form.price_markup_mode !== 'fixed_amount'
+      ? { price_markup_percent: Number(form.price_markup_percent) || 0 }
+      : {}),
     price_rounding_mode: form.price_rounding_mode,
     auto_sync_price: form.auto_sync_price === 'true',
   }
@@ -320,7 +329,10 @@ onMounted(() => {
             <TableCell class="min-w-[200px] px-6 py-4 text-xs text-muted-foreground font-mono break-all">{{ conn.base_url }}</TableCell>
             <TableCell class="min-w-[80px] px-6 py-4 text-xs text-muted-foreground break-words">{{ conn.protocol }}</TableCell>
             <TableCell class="min-w-[80px] px-6 py-4 text-xs text-muted-foreground">
-              <span v-if="conn.price_markup_mode === 'fixed_amount'" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700" :title="t('siteConnections.form.priceMarkupAmountHint')">
+              <span v-if="conn.price_markup_mode === 'segmented'" class="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700" :title="t('siteConnections.form.segmentedMarkupHint')">
+                {{ t('siteConnections.segmentedBadge', { threshold: conn.price_markup_threshold ?? '0.00', amount: conn.price_markup_amount ?? '0.00', percent: conn.price_markup_percent ?? 0 }) }}
+              </span>
+              <span v-else-if="conn.price_markup_mode === 'fixed_amount'" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700" :title="t('siteConnections.form.priceMarkupAmountHint')">
                 {{ t('siteConnections.fixedAmountBadge', { amount: conn.price_markup_amount ?? '0.00' }) }}
               </span>
               <span v-else-if="conn.price_markup_percent && Number(conn.price_markup_percent) !== 0" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
@@ -446,15 +458,20 @@ onMounted(() => {
                   <SelectContent>
                     <SelectItem value="percent">{{ t('siteConnections.form.markupPercent') }}</SelectItem>
                     <SelectItem value="fixed_amount">{{ t('siteConnections.form.markupFixedAmount') }}</SelectItem>
+                    <SelectItem value="segmented">{{ t('siteConnections.form.markupSegmented') }}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div v-if="form.price_markup_mode === 'fixed_amount'">
+              <div v-if="form.price_markup_mode === 'segmented'">
+                <label for="price-markup-threshold" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupThreshold') }}</label>
+                <Input id="price-markup-threshold" v-model="form.price_markup_threshold" type="number" step="0.01" min="0.01" required placeholder="0.00" />
+              </div>
+              <div v-if="form.price_markup_mode !== 'percent'">
                 <label for="price-markup-amount" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupAmount') }}</label>
                 <Input id="price-markup-amount" v-model="form.price_markup_amount" type="number" step="0.01" min="0" required placeholder="0.00" />
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.priceMarkupAmountHint') }}</p>
               </div>
-              <div v-else>
+              <div v-if="form.price_markup_mode !== 'fixed_amount'">
                 <label for="price-markup-percent" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupPercent') }}</label>
                 <div class="relative">
                   <Input id="price-markup-percent" v-model.number="form.price_markup_percent" type="number" step="0.01" min="0" placeholder="0" />
@@ -489,6 +506,10 @@ onMounted(() => {
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.autoSyncPriceHint') }}</p>
               </div>
             </div>
+            <template v-if="form.price_markup_mode === 'segmented'">
+              <p class="mt-3 text-xs text-muted-foreground">{{ t('siteConnections.form.segmentedMarkupHint') }}</p>
+              <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.segmentedWholesaleHint') }}</p>
+            </template>
             <p class="mt-3 text-xs text-muted-foreground">{{ t('siteConnections.form.pricingSaveHint') }}</p>
           </div>
 

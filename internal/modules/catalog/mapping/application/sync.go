@@ -155,7 +155,7 @@ func (s *Service) SyncProduct(mappingID uint) error {
 			localSKU.IsActive = upSKU.IsActive
 			// 如果启用了自动同步价格，按加价规则更新本地售价和成本价
 			if conn.AutoSyncPrice {
-				newLocalPrice := CalculateLocalPrice(upPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
+				newLocalPrice := CalculateLocalPrice(upPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupThreshold.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
 				localSKU.PriceAmount = money.FromDecimal(newLocalPrice.Round(2))
 				localSKU.CostPriceAmount = money.FromDecimal(convertCurrency(upPrice, conn.ExchangeRate).Round(2))
 			}
@@ -174,7 +174,7 @@ func (s *Service) SyncProduct(mappingID uint) error {
 			logger.Warnw("sync_new_sku_price_parse_error", "upstream_sku_id", upSKU.ID, "price_amount", upSKU.PriceAmount, "error", priceErr)
 			continue
 		}
-		localPrice := CalculateLocalPrice(skuPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
+		localPrice := CalculateLocalPrice(skuPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupThreshold.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
 		newLocalSKU := productdomain.ProductSKU{
 			ProductID:       mapping.LocalProductID,
 			SKUCode:         upSKU.SKUCode,
@@ -184,7 +184,7 @@ func (s *Service) SyncProduct(mappingID uint) error {
 			IsActive:        upSKU.IsActive,
 			SortOrder:       0,
 		}
-		if err := s.skus.Create(&newLocalSKU); err != nil {
+		if err := createUpstreamSKU(s.skus, &newLocalSKU); err != nil {
 			continue
 		}
 
@@ -197,7 +197,7 @@ func (s *Service) SyncProduct(mappingID uint) error {
 			UpstreamStock:    upSKU.StockQuantity,
 			StockSyncedAt:    &now,
 		}
-		_ = s.skuMappings.Create(newMapping)
+		_ = createUpstreamSKUMapping(s.skuMappings, newMapping)
 	}
 
 	// ── 2c. 如果启用了自动同步价格，更新 Product.PriceAmount 为最低 SKU 价格 ──
@@ -246,6 +246,7 @@ func (s *Service) syncUpstreamWholesalePrices(mapping *mappingdomain.Mapping, lo
 		conn.ExchangeRate,
 		conn.PriceMarkupPercent,
 		conn.PriceMarkupAmount.Decimal,
+		conn.PriceMarkupThreshold.Decimal,
 		conn.PriceMarkupMode,
 		conn.PriceRoundingMode,
 		buildUpstreamWholesaleSKUIndex(localSKUs, upProduct.SKUs, skuMappings),
@@ -712,7 +713,7 @@ func (s *Service) syncProductFromData(mapping *mappingdomain.Mapping, conn *site
 			localSKU.SpecValuesJSON = upSKU.SpecValues
 			localSKU.IsActive = upSKU.IsActive
 			if conn.AutoSyncPrice {
-				newLocalPrice := CalculateLocalPrice(upPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
+				newLocalPrice := CalculateLocalPrice(upPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupThreshold.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
 				localSKU.PriceAmount = money.FromDecimal(newLocalPrice.Round(2))
 				localSKU.CostPriceAmount = money.FromDecimal(convertCurrency(upPrice, conn.ExchangeRate).Round(2))
 			}
@@ -734,7 +735,7 @@ func (s *Service) syncProductFromData(mapping *mappingdomain.Mapping, conn *site
 			)
 			continue
 		}
-		localPrice := CalculateLocalPrice(skuPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
+		localPrice := CalculateLocalPrice(skuPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupThreshold.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
 		newLocalSKU := productdomain.ProductSKU{
 			ProductID:       mapping.LocalProductID,
 			SKUCode:         upSKU.SKUCode,
@@ -744,7 +745,7 @@ func (s *Service) syncProductFromData(mapping *mappingdomain.Mapping, conn *site
 			IsActive:        upSKU.IsActive,
 			SortOrder:       0,
 		}
-		if err := s.skus.Create(&newLocalSKU); err != nil {
+		if err := createUpstreamSKU(s.skus, &newLocalSKU); err != nil {
 			continue
 		}
 		newSKUMapping := &mappingdomain.SKUMapping{
@@ -756,7 +757,7 @@ func (s *Service) syncProductFromData(mapping *mappingdomain.Mapping, conn *site
 			UpstreamStock:    upSKU.StockQuantity,
 			StockSyncedAt:    now,
 		}
-		_ = s.skuMappings.Create(newSKUMapping)
+		_ = createUpstreamSKUMapping(s.skuMappings, newSKUMapping)
 	}
 
 	// 同步价格
