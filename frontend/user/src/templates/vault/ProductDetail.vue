@@ -23,15 +23,7 @@
       <section class="grid gap-11 py-2.5 lg:grid-cols-2">
         <!-- 图区 -->
         <div>
-          <div class="relative grid aspect-[8/5] w-full place-items-center overflow-hidden rounded-xl bg-muted">
-            <SmartImage :src="currentImage" :alt="getLocalizedText(product.title)" loading="eager" img-class="absolute inset-0 h-full w-full object-contain">
-              <template #fallback>
-                <div class="absolute inset-0 grid place-items-center bg-[linear-gradient(135deg,#7b74f2,var(--red))]">
-                  <Package class="h-[110px] w-[110px] text-white/95" />
-                </div>
-              </template>
-            </SmartImage>
-          </div>
+          <ProductCardStage :src="currentImage" :alt="getLocalizedText(product.title)" />
           <div v-if="images.length > 1" class="mt-3.5 flex flex-wrap gap-3">
             <button
               v-for="(img, idx) in images"
@@ -252,10 +244,11 @@
 
 <script setup lang="ts">
 import SmartImage from '../../components/SmartImage.vue'
+import ProductCardStage from '../../components/product/ProductCardStage.vue'
 import { computed, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  AlertCircle, ArrowLeft, ChevronRight, Lock, Minus, Package, Pencil, Plus,
+  AlertCircle, ArrowLeft, ChevronRight, Lock, Minus, Pencil, Plus,
   RotateCw, ShoppingCart, Tag, TicketCheck, UserPlus, Zap,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'

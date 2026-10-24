@@ -1694,6 +1694,10 @@
     "authClear": "清除已保存信息"
   },
   "productDetail": {
+    "cardMotion": {
+      "pause": "暂停卡片动画",
+      "resume": "继续卡片动画"
+    },
     "description": "商品描述",
     "details": "详细信息",
     "quantity": "购买数量",

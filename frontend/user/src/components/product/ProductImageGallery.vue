@@ -3,15 +3,7 @@
     <div class="mb-4 md:mb-6 relative group"
       @touchstart="onImageTouchStart"
       @touchend="onImageTouchEnd">
-      <div class="w-full aspect-[8/5] bg-muted rounded-xl border relative z-10 shadow-lg overflow-hidden">
-        <SmartImage :src="currentImage" :alt="productTitle" loading="eager" img-class="w-full h-full object-contain">
-          <template #fallback>
-            <div class="w-full h-full flex items-center justify-center">
-              <ImageIcon class="w-24 h-24 text-muted-foreground" :stroke-width="1.5" />
-            </div>
-          </template>
-        </SmartImage>
-      </div>
+      <ProductCardStage :src="currentImage" :alt="productTitle" />
     </div>
 
     <!-- Thumbnail Gallery: horizontal scroll on mobile, grid on desktop -->
@@ -27,7 +19,7 @@
 
 <script setup lang="ts">
 import SmartImage from '../SmartImage.vue'
-import { Image as ImageIcon } from 'lucide-vue-next'
+import ProductCardStage from './ProductCardStage.vue'
 
 const props = defineProps<{
   images: string[]

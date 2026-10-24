@@ -191,6 +191,10 @@
     "quickBuy": "Buy"
   },
   "productDetail": {
+    "cardMotion": {
+      "pause": "Pause card animation",
+      "resume": "Resume card animation"
+    },
     "description": "Description",
     "details": "Details",
     "quantity": "Quantity",

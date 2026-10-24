@@ -191,6 +191,10 @@
     "quickBuy": "購買"
   },
   "productDetail": {
+    "cardMotion": {
+      "pause": "暫停卡片動畫",
+      "resume": "繼續卡片動畫"
+    },
     "description": "商品描述",
     "details": "詳細資訊",
     "quantity": "購買數量",
