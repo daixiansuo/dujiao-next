@@ -843,3 +843,73 @@ func TestListRetainsCreationTimeOrderWithoutStorefrontPriceSorting(t *testing.T)
 		t.Fatalf("legacy list must keep newest first, got %s, %s", rows[0].Slug, rows[1].Slug)
 	}
 }
+
+func TestListForResellerStorefrontSortsBeforePagination(t *testing.T) {
+	repo, db := setupProductStoreTest(t)
+	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	newer := created.Add(time.Hour)
+	amount := func(value string) money.Amount { return money.FromDecimal(decimal.RequireFromString(value)) }
+	sku := func(code, price string, weight int, deleted *time.Time) productdomain.ProductSKU {
+		return productdomain.ProductSKU{SKUCode: code, PriceAmount: amount(price), SortOrder: weight, IsActive: true, DeletedAt: deleted}
+	}
+	fixtures := []struct {
+		slug    string
+		price   string
+		weight  int
+		created time.Time
+		skus    []productdomain.ProductSKU
+	}{
+		{"multi", "1", 10, created, []productdomain.ProductSKU{sku("first", "89.90", 100, nil), sku("minimum", "1", 10, nil)}},
+		{"hundred", "100", 10, created, nil},
+		{"decimal", "9.99", 10, created, nil},
+		{"cheap", "2", 10, created, nil},
+		{"pinned", "500", 20, created, nil},
+		{"older-ten", "10", 10, created, nil},
+		{"newer-ten", "10", 10, newer, nil},
+		{"tied-ten", "10", 10, newer, nil},
+		{"sku-tie", "1", 10, created, []productdomain.ProductSKU{sku("first-tied", "20", 10, nil), sku("second-tied", "1", 10, nil)}},
+		{"fallback", "15", 10, created, []productdomain.ProductSKU{sku("disabled", "0.50", 100, nil), sku("deleted", "0.25", 200, &created)}},
+		{"low-weight", "1", 0, newer, nil},
+		{"visible-sku", "1", 10, created, []productdomain.ProductSKU{sku("disabled", "0.50", 100, nil), sku("deleted", "0.25", 200, &created), sku("visible", "25", 10, nil)}},
+		{"hidden", "0.01", 30, newer, nil},
+	}
+	var hiddenID uint
+	for _, fixture := range fixtures {
+		product := productdomain.Product{
+			CategoryID: 1, Slug: fixture.slug, TitleJSON: jsonmap.JSON{"zh-CN": fixture.slug},
+			PriceAmount: amount(fixture.price), SortOrder: fixture.weight, CreatedAt: fixture.created,
+			IsActive: true, SKUs: fixture.skus,
+		}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatal(err)
+		}
+		if fixture.slug == "hidden" {
+			hiddenID = product.ID
+		}
+	}
+	if err := db.Model(&productdomain.ProductSKU{}).Where("sku_code = ?", "disabled").Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pinned", "cheap", "decimal", "tied-ten", "newer-ten", "older-ten", "fallback", "sku-tie", "visible-sku", "multi", "hundred", "low-weight"}
+	for _, pageSize := range []int{3, 20} {
+		var got []string
+		for page := 1; page <= (len(want)+pageSize-1)/pageSize+1; page++ {
+			rows, total, err := repo.ListForResellerStorefront(productcontract.ListFilter{
+				OnlyActive: true, WithCategory: true, CategoryID: "1", ExcludeProductIDs: []uint{hiddenID}, Page: page, PageSize: pageSize,
+			})
+			if err != nil || total != int64(len(want)) {
+				t.Fatalf("page=%d size=%d total=%d err=%v", page, pageSize, total, err)
+			}
+			for _, row := range rows {
+				got = append(got, row.Slug)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("page size %d: want %v, got %v", pageSize, want, got)
+		}
+	}
+	rows, total, err := repo.ListForResellerStorefront(productcontract.ListFilter{OnlyActive: true, Search: "minimum", Page: 1, PageSize: 3})
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].Slug != "multi" {
+		t.Fatalf("SKU search: total=%d rows=%+v err=%v", total, rows, err)
+	}
+}

@@ -17,6 +17,7 @@ import (
 // ProductRepository 是读取应用服务所需的最小商品持久化端口。
 type ProductRepository interface {
 	ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
+	ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
 	List(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
 	GetBySlug(slug string, onlyActive bool) (*productdomain.Product, error)
 	GetAdminByID(id string) (*productdomain.Product, error)
@@ -106,7 +107,7 @@ func (s *Service) ListPublicForTenant(tenant reseller.TenantContext, resellerRep
 		return nil, 0, err
 	}
 	filter.ExcludeProductIDs = hiddenIDs
-	return s.products.List(filter)
+	return s.products.ListForResellerStorefront(filter)
 }
 
 // ListForUpstreamSync 上游同步专用：可选包含已下架商品，便于下游识别下架状态

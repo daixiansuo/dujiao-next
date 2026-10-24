@@ -17,22 +17,32 @@ import (
 )
 
 type productRepositoryStub struct {
-	storefront bool
-	filter     productcontract.ListFilter
-	rows       []productdomain.Product
-	total      int64
-	bySlug     *productdomain.Product
-	byAdmin    *productdomain.Product
+	storefront         bool
+	resellerStorefront bool
+	filter             productcontract.ListFilter
+	rows               []productdomain.Product
+	total              int64
+	bySlug             *productdomain.Product
+	byAdmin            *productdomain.Product
 }
 
 func (stub *productRepositoryStub) List(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
 	stub.storefront = false
+	stub.resellerStorefront = false
 	stub.filter = filter
 	return stub.rows, stub.total, nil
 }
 
 func (stub *productRepositoryStub) ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
 	stub.storefront = true
+	stub.resellerStorefront = false
+	stub.filter = filter
+	return stub.rows, stub.total, nil
+}
+
+func (stub *productRepositoryStub) ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	stub.storefront = false
+	stub.resellerStorefront = true
 	stub.filter = filter
 	return stub.rows, stub.total, nil
 }
@@ -100,8 +110,8 @@ func TestListPublicForTenantBuildsVisibilityFilterBeforePagination(t *testing.T)
 	if err != nil {
 		t.Fatalf("ListPublicForTenant returned error: %v", err)
 	}
-	if products.storefront {
-		t.Fatal("reseller list must retain the existing query")
+	if !products.resellerStorefront || products.storefront {
+		t.Fatal("reseller list must use the dedicated reseller storefront query")
 	}
 	if total != 2 {
 		t.Fatalf("total want 2 got %d", total)
@@ -171,7 +181,7 @@ func TestListPublicForMainTenantUsesStorefrontQuery(t *testing.T) {
 	if err != nil || total != 1 || len(rows) != 1 || rows[0].ID != 1 {
 		t.Fatalf("storefront query result: rows=%v total=%d err=%v", rows, total, err)
 	}
-	if !products.storefront {
+	if !products.storefront || products.resellerStorefront {
 		t.Fatal("main storefront must use the storefront query")
 	}
 	filter := products.filter
@@ -200,7 +210,7 @@ func TestOtherProductQueriesRetainExistingList(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if products.storefront || products.filter.PageSize != 20 {
+			if products.storefront || products.resellerStorefront || products.filter.PageSize != 20 {
 				t.Fatalf("%s must use the original list query, got %#v", name, products)
 			}
 		})

@@ -195,11 +195,12 @@ func TestProductServiceDeleteRollsBackCascadeWhenProductDeleteFails(t *testing.T
 	deleteFailure := errors.New("delete product failed")
 	baseProductStore := productgormstore.NewProductStore(db)
 	productRepo := &failingProductDeleteRepository{
-		Repository:     baseProductStore,
-		storefrontList: baseProductStore.ListForStorefront,
-		transaction:    baseProductStore.Transaction,
-		binder:         baseProductStore.BindTx,
-		err:            deleteFailure,
+		Repository:             baseProductStore,
+		storefrontList:         baseProductStore.ListForStorefront,
+		resellerStorefrontList: baseProductStore.ListForResellerStorefront,
+		transaction:            baseProductStore.Transaction,
+		binder:                 baseProductStore.BindTx,
+		err:                    deleteFailure,
 	}
 	service := catalogproductbootstrap.New(catalogproductbootstrap.Dependencies{
 		Products:          productRepo,
@@ -266,14 +267,19 @@ func TestProductServiceDeleteRollsBackCascadeWhenProductDeleteFails(t *testing.T
 
 type failingProductDeleteRepository struct {
 	productcontract.Repository
-	storefrontList func(productcontract.ListFilter) ([]productdomain.Product, int64, error)
-	transaction    func(func(*gorm.DB) error) error
-	binder         func(*gorm.DB) productcontract.Repository
-	err            error
+	storefrontList         func(productcontract.ListFilter) ([]productdomain.Product, int64, error)
+	resellerStorefrontList func(productcontract.ListFilter) ([]productdomain.Product, int64, error)
+	transaction            func(func(*gorm.DB) error) error
+	binder                 func(*gorm.DB) productcontract.Repository
+	err                    error
 }
 
 func (repo *failingProductDeleteRepository) ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
 	return repo.storefrontList(filter)
+}
+
+func (repo *failingProductDeleteRepository) ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	return repo.resellerStorefrontList(filter)
 }
 
 func (repo *failingProductDeleteRepository) Delete(string) error {

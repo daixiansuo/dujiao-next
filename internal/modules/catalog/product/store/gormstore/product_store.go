@@ -59,6 +59,18 @@ func (r *ProductStore) ListForStorefront(filter productcontract.ListFilter) ([]p
 		products.created_at DESC, products.id DESC`)
 }
 
+// ListForResellerStorefront 按权重、主站基础展示售价、创建时间排序分销前台商品。
+func (r *ProductStore) ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	// 排序使用主站首个启用规格的基础售价；分销加价和隐藏 SKU 后的展示价仍由原流程计算。
+	return r.list(filter, `products.sort_order DESC,
+		COALESCE((
+			SELECT ps.price_amount FROM product_skus ps
+			WHERE ps.product_id = products.id AND ps.deleted_at IS NULL AND ps.is_active = true
+			ORDER BY ps.sort_order DESC, ps.id ASC LIMIT 1
+		), products.price_amount) ASC,
+		products.created_at DESC, products.id DESC`)
+}
+
 func (r *ProductStore) list(filter productcontract.ListFilter, order string) ([]productdomain.Product, int64, error) {
 	var products []productdomain.Product
 
