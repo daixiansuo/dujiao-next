@@ -9,6 +9,7 @@ import (
 // ListFilter 是商品映射列表筛选条件。
 type ListFilter struct {
 	ConnectionID   uint
+	CategoryID     uint
 	UpstreamStatus string
 	ProductStatus  string
 	Search         string

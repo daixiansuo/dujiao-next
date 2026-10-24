@@ -134,6 +134,52 @@ func TestMappingStoreListFiltersAndPaginates(t *testing.T) {
 	}
 }
 
+func TestMappingStoreListFiltersByLocalCategory(t *testing.T) {
+	store, _, db := setupMappingStoreTest(t)
+	category := categorydomain.Category{Slug: "other-category", NameJSON: jsonmap.JSON{"zh-CN": "其他分类"}}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i, categoryID := range []uint{1, 1, category.ID, 0, 1} {
+		product := createMappedProduct(t, db, fmt.Sprintf("category-product-%d", i), "测试商品")
+		if err := db.Model(product).Update("category_id", categoryID).Error; err != nil {
+			t.Fatal(err)
+		}
+		createMapping(t, store, uint(i%2+1), product.ID, uint(1000+i), mappingdomain.UpstreamStatusActive, true)
+		if i == 4 {
+			if err := db.Model(product).Update("deleted_at", time.Now()).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		filter mappingcontract.ListFilter
+		rows   int
+		total  int64
+	}{
+		{name: "all includes uncategorized", rows: 5, total: 5},
+		{name: "category excludes other and deleted products", filter: mappingcontract.ListFilter{CategoryID: 1}, rows: 2, total: 2},
+		{name: "other category", filter: mappingcontract.ListFilter{CategoryID: category.ID}, rows: 1, total: 1},
+		{name: "combined filters", filter: mappingcontract.ListFilter{CategoryID: 1, ConnectionID: 2, Search: "测试", ProductStatus: "active", UpstreamStatus: mappingdomain.UpstreamStatusActive}, rows: 1, total: 1},
+		{name: "first page", filter: mappingcontract.ListFilter{CategoryID: 1, Page: 1, PageSize: 1}, rows: 1, total: 2},
+		{name: "second page", filter: mappingcontract.ListFilter{CategoryID: 1, Page: 2, PageSize: 1}, rows: 1, total: 2},
+		{name: "missing category", filter: mappingcontract.ListFilter{CategoryID: 9999}, rows: 0, total: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, total, err := store.List(tc.filter)
+			if err != nil || len(rows) != tc.rows || total != tc.total {
+				t.Fatalf("rows=%d total=%d err=%v, want rows=%d total=%d", len(rows), total, err, tc.rows, tc.total)
+			}
+			for _, row := range rows {
+				if tc.filter.CategoryID > 0 && (row.Product == nil || row.Product.CategoryID != tc.filter.CategoryID) {
+					t.Fatalf("mapping %d does not match category %d", row.ID, tc.filter.CategoryID)
+				}
+			}
+		})
+	}
+}
+
 func TestMappingStoreDeleteByLocalProductRemovesSKUMappings(t *testing.T) {
 	store, skuStore, db := setupMappingStoreTest(t)
 

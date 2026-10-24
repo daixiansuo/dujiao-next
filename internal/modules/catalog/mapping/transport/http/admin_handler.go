@@ -51,6 +51,11 @@ func (h *AdminHandler) GetProductMappings(c *gin.Context) {
 	page, pageSize := ginutil.ParsePagination(c)
 
 	connectionID, _ := ginutil.ParseQueryUint(c.Query("connection_id"), false)
+	categoryID, err := ginutil.ParseQueryUint(c.Query("category_id"), false)
+	if err != nil {
+		ginutil.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
 	upstreamStatus := c.Query("upstream_status")
 	if upstreamStatus != "" {
 		validStatuses := map[string]bool{
@@ -72,6 +77,7 @@ func (h *AdminHandler) GetProductMappings(c *gin.Context) {
 
 	mappings, total, err := h.service.List(mappingcontract.ListFilter{
 		ConnectionID:   connectionID,
+		CategoryID:     categoryID,
 		UpstreamStatus: upstreamStatus,
 		ProductStatus:  productStatus,
 		Search:         search,

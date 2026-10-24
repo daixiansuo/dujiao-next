@@ -129,6 +129,7 @@ func BuiltinRoleSeeds() []RoleSeed {
 			Role:     "integration",
 			Inherits: []string{"readonly_auditor"},
 			Policies: []Policy{
+				{Object: "/admin/categories", Action: "GET"},
 				{Object: "/admin/site-connections", Action: "*"},
 				{Object: "/admin/site-connections/:id", Action: "*"},
 				{Object: "/admin/site-connections/:id/ping", Action: "POST"},

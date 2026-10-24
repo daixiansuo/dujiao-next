@@ -103,6 +103,12 @@ func (r *MappingStore) List(filter mappingcontract.ListFilter) ([]mappingdomain.
 	if filter.ConnectionID > 0 {
 		q = q.Where("connection_id = ?", filter.ConnectionID)
 	}
+	if filter.CategoryID > 0 {
+		q = q.Where(
+			"product_mappings.local_product_id IN (SELECT id FROM products WHERE deleted_at IS NULL AND category_id = ?)",
+			filter.CategoryID,
+		)
+	}
 	if filter.UpstreamStatus != "" {
 		q = q.Where("upstream_status = ?", filter.UpstreamStatus)
 	}

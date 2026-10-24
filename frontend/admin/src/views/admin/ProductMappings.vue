@@ -32,7 +32,7 @@ const categoryOptions = computed(() => flattenAdminCategories(categories.value).
   selectable: isAdminProductCategorySelectable(item.category, categoryChildCountMap.value),
 })))
 const pagination = reactive({ page: 1, page_size: 20, total: 0, total_page: 1 })
-const filters = reactive({ connection_id: '__all__', upstream_status: '__all__', product_status: '__all__', search: '' })
+const filters = reactive({ connection_id: '__all__', category_id: '__all__', upstream_status: '__all__', product_status: '__all__', search: '' })
 const syncingId = ref<number | null>(null)
 
 // Expand detail
@@ -233,6 +233,7 @@ const fetchMappings = async (page = 1, options: ListFetchOptions = {}) => {
     const res = await adminAPI.getProductMappings({
       page, page_size: pagination.page_size,
       connection_id: connId || undefined,
+      category_id: normalizeFilterValue(filters.category_id) || undefined,
       upstream_status: us || undefined,
       product_status: ps || undefined,
       search: filters.search || undefined,
@@ -735,6 +736,23 @@ onMounted(() => { fetchConnections(); fetchCategories(); fetchMappings() })
           <SelectContent>
             <SelectItem value="__all__">{{ t('productMappings.filter.allConnections') }}</SelectItem>
             <SelectItem v-for="conn in connections" :key="conn.id" :value="String(conn.id)">{{ conn.name }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select v-model="filters.category_id" @update:modelValue="handleFilterChange">
+          <SelectTrigger class="h-9 w-full sm:w-[220px]">
+            <SelectValue :placeholder="t('admin.products.filters.categoryPlaceholder')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">{{ t('admin.products.filters.categoryAll') }}</SelectItem>
+            <SelectItem
+              v-for="item in categoryOptions"
+              :key="item.category.id"
+              :value="String(item.category.id)"
+              :disabled="!item.selectable"
+              :class="item.depth > 0 ? 'pl-5' : ''"
+            >
+              {{ getCategoryOptionLabel(item.category) }}
+            </SelectItem>
           </SelectContent>
         </Select>
         <div class="relative w-full sm:w-[220px]">
