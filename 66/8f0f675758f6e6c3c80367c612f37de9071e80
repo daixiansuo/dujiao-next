@@ -1,0 +1,19 @@
+.gitignore
+  s_88adbc563097f9::t_694070b07be0f3 24-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "668f0f675758f6e6c3c80367c612f37de9071e80",
+  "prompts": {},
+  "sessions": {
+    "s_88adbc563097f9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5f8-3739-7452-8b69-e93c0e420fa5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
