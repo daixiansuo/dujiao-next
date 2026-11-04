@@ -22,3 +22,6 @@ internal/web/dist/
 # Agents 配置
 .agents/
 skills-lock.json
+
+# 本地生成的素材、教程草稿及导出文件
+/output/
