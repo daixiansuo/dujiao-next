@@ -20,14 +20,15 @@
       <Button as-child class="mt-2 rounded-full" size="sm"><RouterLink to="/products">{{ t('cart.emptyAction') }}</RouterLink></Button>
     </div>
 
-    <div v-else class="grid grid-cols-1 items-start gap-7 lg:grid-cols-[1fr_340px]">
+    <div v-else class="grid grid-cols-1 items-start gap-7 lg:grid-cols-[minmax(0,1fr)_340px]">
       <!-- 商品列表 -->
-      <div class="grid grid-cols-1 gap-4">
-        <article v-for="item in cartItems" :key="cartItemKey(item)" class="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-3 rounded-xl border bg-card p-4 sm:grid-cols-[128px_minmax(0,1fr)_auto] sm:gap-x-5">
+      <div class="grid min-w-0 grid-cols-1 gap-4">
+        <article v-for="item in cartItems" :key="cartItemKey(item)" class="grid min-w-0 grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-3 rounded-xl border bg-card p-4 sm:grid-cols-[128px_minmax(0,1fr)_auto] sm:gap-x-5">
           <div class="col-span-2 flex min-w-0 items-start justify-between gap-3 sm:contents">
             <RouterLink :to="`/products/${item.slug}`" class="min-w-0 line-clamp-2 font-bold sm:col-start-2 sm:row-start-1 hover:text-primary">{{ getLocalizedText(item.title) }}</RouterLink>
-            <button type="button" class="grid h-10 w-10 flex-none self-start sm:col-start-3 sm:row-span-2 sm:row-start-1 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" :aria-label="t('cart.remove')" @click="removeWithUndo(item)">
-              <Trash2 class="h-[18px] w-[18px]" />
+            <button type="button" class="inline-flex h-10 flex-none self-start items-center gap-1.5 rounded-full border-2 border-hairline-strong px-3 text-muted-foreground transition-colors hover:border-destructive hover:bg-destructive/10 hover:text-destructive sm:col-start-3 sm:row-span-2 sm:row-start-1" :aria-label="t('cart.remove')" @click="removeWithUndo(item)">
+              <Trash2 class="h-4 w-4" />
+              <span class="text-[13px] font-semibold">{{ t('cart.remove') }}</span>
             </button>
           </div>
 

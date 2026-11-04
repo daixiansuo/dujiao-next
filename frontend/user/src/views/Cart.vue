@@ -33,13 +33,13 @@
                   {{ getLocalizedText(item.title) }}
                 </router-link>
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   @click="removeWithUndo(item)"
-                  class="self-start sm:col-start-3 sm:row-span-2 sm:row-start-1 shrink-0 min-w-[44px] min-h-[44px] text-muted-foreground hover:text-destructive hover:bg-transparent"
+                  class="self-start sm:col-start-3 sm:row-span-2 sm:row-start-1 shrink-0 min-h-[44px] gap-1.5 rounded-full border-muted-foreground/30 text-muted-foreground hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
                 >
-                  <Trash2 class="md:hidden" />
-                  <span class="hidden md:inline">{{ t('cart.remove') }}</span>
+                  <Trash2 class="h-4 w-4" />
+                  <span>{{ t('cart.remove') }}</span>
                 </Button>
               </div>
 
