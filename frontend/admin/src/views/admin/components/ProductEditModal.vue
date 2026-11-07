@@ -58,19 +58,7 @@ const getCategoryOptionLabel = (category: AdminCategory) => {
   return buildAdminCategoryPath(category, categoryMap.value, (item) => getLocalizedText(item.name))
 }
 
-const getCategoryOptionName = (category: AdminCategory) => {
-  return getLocalizedText(category.name)
-}
-
-const getCategoryLeafTip = () => {
-  if (locale.value === 'en-US') {
-    return 'Root categories with child categories cannot receive products directly. Choose a leaf category.'
-  }
-  if (locale.value === 'zh-TW') {
-    return '已有二級分類的一級分類不能直接掛商品，請選擇末級分類'
-  }
-  return '已有二级分类的一级分类不能直接挂商品，请选择末级分类'
-}
+const getCategoryLeafTip = () => t('admin.categories.form.leafTip')
 
 const getCategoryRequiredError = () => {
   if (locale.value === 'en-US') return 'Please select a category'
@@ -795,9 +783,10 @@ watch(
                   :key="item.category.id"
                   :value="String(item.category.id)"
                   :disabled="!item.selectable"
-                  :class="item.depth > 0 ? 'pl-6' : ''"
+                  class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }"
                 >
-                  {{ item.depth > 0 ? getCategoryOptionName(item.category) : getCategoryOptionLabel(item.category) }}
+                  {{ getCategoryOptionLabel(item.category) }}
                 </SelectItem>
               </SelectContent>
             </Select>

@@ -16,7 +16,7 @@ import { getLocalizedText } from '@/utils/format'
 import { getImageUrl } from '@/utils/image'
 import { notifyError, notifySuccess } from '@/utils/notify'
 import { confirmAction } from '@/utils/confirm'
-import { buildAdminCategoryPath, createAdminCategoryMap, flattenAdminCategories } from '@/utils/category'
+import { buildAdminCategoryPath, createAdminCategoryMap, flattenAdminCategories, getAdminCategoryParentOptions } from '@/utils/category'
 import { useFormValidation, rules } from '@/composables/useFormValidation'
 
 const { t } = useI18n()
@@ -46,30 +46,11 @@ const form = reactive({
 const categoryMap = computed(() => createAdminCategoryMap(categories.value))
 const categoryHierarchyItems = computed(() => flattenAdminCategories(categories.value))
 
-const hasChildren = (categoryId: number) => categories.value.some((item) => item.parent_id === categoryId)
+const parentCategoryOptions = computed(() => getAdminCategoryParentOptions(categories.value, form.id))
 
-const canChooseParent = computed(() => {
-  if (!isEditing.value || form.id <= 0) return true
-  const current = categoryMap.value.get(form.id)
-  if (!current) return true
-  if (current.parent_id > 0) return true
-  return !hasChildren(current.id)
-})
-
-const parentCategoryOptions = computed(() => {
-  const roots = categoryHierarchyItems.value
-    .filter((item) => item.depth === 0 && item.category.id !== form.id)
-    .map((item) => item.category)
-
-  if (!canChooseParent.value) {
-    return []
-  }
-
-  return roots
-})
-
-const getCategoryLevelText = (category: AdminCategory) => {
-  return category.parent_id > 0 ? t('admin.categories.level.child') : t('admin.categories.level.root')
+const getCategoryLevelText = (depth: number) => {
+  const levels = ['root', 'child', 'third']
+  return t(`admin.categories.level.${levels[depth] || 'third'}`)
 }
 
 const getCategoryPath = (category: AdminCategory) => {
@@ -244,18 +225,18 @@ watch(
               <span v-else class="text-xs text-muted-foreground">-</span>
             </TableCell>
             <TableCell class="min-w-[260px] px-6 py-4">
-              <div class="space-y-1" :class="item.depth > 0 ? 'pl-6' : ''">
+              <div class="space-y-1" :style="{ paddingLeft: `${item.depth * 20}px` }">
                 <div class="flex items-start gap-2">
                   <span
                     class="inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[11px]"
                     :class="item.depth > 0 ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-border bg-muted/30 text-muted-foreground'"
                   >
-                    {{ getCategoryLevelText(item.category) }}
+                    {{ getCategoryLevelText(item.depth) }}
                   </span>
                   <span class="min-w-0 break-words font-medium text-foreground">{{ getLocalizedText(item.category.name) }}</span>
                 </div>
                 <div v-if="item.parent" class="text-xs text-muted-foreground break-words">
-                  {{ t('admin.categories.table.parentPrefix', { name: getLocalizedText(item.parent.name) }) }}
+                  {{ t('admin.categories.table.parentPrefix', { name: getCategoryPath(item.parent) }) }}
                 </div>
               </div>
             </TableCell>
@@ -326,13 +307,14 @@ watch(
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="0">{{ t('admin.categories.form.parentRoot') }}</SelectItem>
-                <SelectItem v-for="category in parentCategoryOptions" :key="category.id" :value="String(category.id)">
-                  {{ getCategoryPath(category) }}
+                <SelectItem v-for="item in parentCategoryOptions" :key="item.category.id" :value="String(item.category.id)" class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }">
+                  {{ getCategoryPath(item.category) }}
                 </SelectItem>
               </SelectContent>
             </Select>
             <p class="text-xs text-muted-foreground mt-1">
-              {{ canChooseParent ? t('admin.categories.form.parentTip') : t('admin.categories.form.parentLockedTip') }}
+              {{ t('admin.categories.form.parentTip') }}
             </p>
           </div>
 

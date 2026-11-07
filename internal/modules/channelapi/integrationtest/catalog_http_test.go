@@ -60,6 +60,15 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 	if err := db.Create(&child).Error; err != nil {
 		t.Fatalf("create child category failed: %v", err)
 	}
+	grandchild := categorydomain.Category{
+		ParentID:  child.ID,
+		Slug:      "steam-cards",
+		NameJSON:  jsonmap.JSON{"zh-CN": "Steam 礼品卡"},
+		SortOrder: 100, // 子分类排在祖先之前时也应完整返回。
+	}
+	if err := db.Create(&grandchild).Error; err != nil {
+		t.Fatalf("create third-level category failed: %v", err)
+	}
 	hidden := categorydomain.Category{
 		Slug:     "hidden",
 		NameJSON: jsonmap.JSON{"zh-CN": "hidden"},
@@ -69,7 +78,7 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 	}
 
 	product := productdomain.Product{
-		CategoryID:  child.ID,
+		CategoryID:  grandchild.ID,
 		Slug:        "steam-product",
 		TitleJSON:   jsonmap.JSON{"zh-CN": "Steam Product"},
 		PriceAmount: money.FromDecimal(decimal.NewFromInt(10)),
@@ -105,8 +114,8 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected items array, got %T", payload.Data["items"])
 	}
-	if len(itemsValue) != 2 {
-		t.Fatalf("expected 2 visible categories, got %d", len(itemsValue))
+	if len(itemsValue) != 3 {
+		t.Fatalf("expected 3 visible categories, got %d", len(itemsValue))
 	}
 
 	itemsBySlug := make(map[string]map[string]any, len(itemsValue))
@@ -137,8 +146,12 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 	if childItem["parent_id"] != float64(parent.ID) {
 		t.Fatalf("expected child parent_id=%d, got %v", parent.ID, childItem["parent_id"])
 	}
-	if childItem["product_count"] != float64(1) {
-		t.Fatalf("expected child product_count=1, got %v", childItem["product_count"])
+	if childItem["product_count"] != float64(0) {
+		t.Fatalf("expected direct child product_count=0, got %v", childItem["product_count"])
+	}
+	grandchildItem, ok := itemsBySlug["steam-cards"]
+	if !ok || grandchildItem["parent_id"] != float64(child.ID) || grandchildItem["product_count"] != float64(1) {
+		t.Fatalf("third-level category parent/count missing: %+v", grandchildItem)
 	}
 
 	if _, ok := itemsBySlug["hidden"]; ok {

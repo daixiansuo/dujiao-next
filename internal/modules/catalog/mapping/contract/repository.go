@@ -10,6 +10,7 @@ import (
 type ListFilter struct {
 	ConnectionID   uint
 	CategoryID     uint
+	CategoryIDs    []uint
 	UpstreamStatus string
 	ProductStatus  string
 	Search         string
@@ -62,6 +63,7 @@ type SKURepository interface {
 // CategoryRepository 是映射上下文所需的分类端口。
 type CategoryRepository interface {
 	productdomain.CategoryAssignmentRepository
+	List() ([]categorydomain.Category, error)
 	GetBySlug(slug string) (*categorydomain.Category, error)
 	GetBySlugUnscoped(slug string) (*categorydomain.Category, error)
 	Restore(category *categorydomain.Category) error

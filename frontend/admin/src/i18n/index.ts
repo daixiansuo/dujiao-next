@@ -1779,6 +1779,7 @@ const messages = {
         level: {
           root: '一级',
           child: '二级',
+          third: '三级',
         },
         status: {
           active: '已启用',
@@ -1807,7 +1808,8 @@ const messages = {
           parent: '父分类',
           parentPlaceholder: '选择父分类',
           parentRoot: '作为一级分类',
-          parentTip: '不选择父分类时，当前分类将作为一级分类。',
+          parentTip: '最多三级分类；不选择父分类时作为一级分类。仅列出适合当前分类层级的父分类。',
+          leafTip: '已有子分类的分类不能直接挂新商品，请选择末级分类。',
           parentLockedTip: '当前一级分类下已有子分类，不能再设置父分类。',
           icon: '分类图标',
           iconUploadHint: '点击或拖拽图片到此处',
@@ -6465,6 +6467,7 @@ const messages = {
         level: {
           root: '一級',
           child: '二級',
+          third: '三級',
         },
         status: {
           active: '已啟用',
@@ -6493,7 +6496,8 @@ const messages = {
           parent: '父分類',
           parentPlaceholder: '選擇父分類',
           parentRoot: '作為一級分類',
-          parentTip: '不選擇父分類時，當前分類將作為一級分類。',
+          parentTip: '最多三級分類；不選擇父分類時作為一級分類。僅列出適合當前分類層級的父分類。',
+          leafTip: '已有子分類的分類不能直接掛新商品，請選擇末級分類。',
           parentLockedTip: '當前一級分類下已有子分類，不能再設定父分類。',
           icon: '分類圖標',
           iconUploadHint: '點擊或拖拽圖片到此處',
@@ -11151,6 +11155,7 @@ const messages = {
         level: {
           root: 'Level 1',
           child: 'Level 2',
+          third: 'Level 3',
         },
         status: {
           active: 'Active',
@@ -11179,7 +11184,8 @@ const messages = {
           parent: 'Parent category',
           parentPlaceholder: 'Select parent category',
           parentRoot: 'Use as top-level category',
-          parentTip: 'If no parent is selected, this category will remain top-level.',
+          parentTip: 'Up to three levels. Leave the parent empty for a top-level category. Only parents that fit the category depth are listed.',
+          leafTip: 'Categories with child categories cannot receive new products directly. Choose a leaf category.',
           parentLockedTip: 'This top-level category already has child categories and cannot be assigned a parent.',
           icon: 'Category icon',
           iconUploadHint: 'Click or drag image here',

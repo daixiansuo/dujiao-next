@@ -1,5 +1,6 @@
 {
   "common": {
+    "close": "關閉",
     "siteName": "Dujiao-Next",
     "loading": "載入中...",
     "error": "錯誤",
@@ -144,6 +145,8 @@
     }
   },
   "products": {
+    "browseCategories": "全部分類",
+    "toggleCategory": "展開或收起{name}",
     "subtitle": "瀏覽我們的精選商品",
     "priceAria": "價格 {price}",
     "promotionPriceAria": "促銷價 {price}",

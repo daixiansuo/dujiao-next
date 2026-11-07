@@ -174,10 +174,15 @@ func (s *Service) GetPublicBySlugForTenant(tenant reseller.TenantContext, resell
 // ListAdmin 获取后台商品列表
 // isActive 为三态上架筛选：nil=不限，true=仅已上架，false=仅已下架。
 func (s *Service) ListAdmin(categoryID, search, fulfillmentType, stockStatus string, hasWholesalePrices, isActive *bool, lowStockThreshold int, page, pageSize int) ([]productdomain.Product, int64, error) {
+	categoryIDs, err := expandCategoryIDs(s.categories, categoryID, false)
+	if err != nil {
+		return nil, 0, err
+	}
 	filter := productcontract.ListFilter{
 		Page:               page,
 		PageSize:           pageSize,
 		CategoryID:         categoryID,
+		CategoryIDs:        categoryIDs,
 		Search:             search,
 		FulfillmentType:    strings.TrimSpace(fulfillmentType),
 		StockStatus:        normalizeStockStatus(stockStatus),
@@ -215,6 +220,10 @@ func normalizeStockStatus(raw string) string {
 }
 
 func expandPublicCategoryIDs(categoryRepo CategoryRepository, categoryID string) ([]uint, error) {
+	return expandCategoryIDs(categoryRepo, categoryID, true)
+}
+
+func expandCategoryIDs(categoryRepo CategoryRepository, categoryID string, onlyActive bool) ([]uint, error) {
 	normalizedCategoryID := strings.TrimSpace(categoryID)
 	if normalizedCategoryID == "" {
 		return nil, nil
@@ -235,11 +244,8 @@ func expandPublicCategoryIDs(categoryRepo CategoryRepository, categoryID string)
 	if category == nil {
 		return []uint{uint(parsedCategoryID)}, nil
 	}
-	if !category.IsActive {
+	if onlyActive && !category.IsActive {
 		return []uint{}, nil
-	}
-	if category.ParentID > 0 {
-		return []uint{category.ID}, nil
 	}
 
 	categories, err := categoryRepo.List()
@@ -247,11 +253,19 @@ func expandPublicCategoryIDs(categoryRepo CategoryRepository, categoryID string)
 		return nil, err
 	}
 
-	categoryIDs := []uint{category.ID}
+	categoryIDs := categorydomain.DescendantIDs(categories, category.ID)
+	if !onlyActive {
+		return categoryIDs, nil
+	}
+	active := map[uint]bool{category.ID: category.IsActive}
 	for _, item := range categories {
-		if item.ParentID == category.ID && item.IsActive {
-			categoryIDs = append(categoryIDs, item.ID)
+		active[item.ID] = item.IsActive
+	}
+	visibleIDs := make([]uint, 0, len(categoryIDs))
+	for _, id := range categoryIDs {
+		if active[id] {
+			visibleIDs = append(visibleIDs, id)
 		}
 	}
-	return categoryIDs, nil
+	return visibleIDs, nil
 }

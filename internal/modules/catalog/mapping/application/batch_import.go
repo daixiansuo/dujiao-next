@@ -206,24 +206,36 @@ func (s *Service) BatchImportByCategory(
 func (s *Service) findOrCreateCategoryFromUpstream(
 	upstreamCategoryID uint, catMap map[uint]upstream.UpstreamCategory,
 ) (*categorydomain.Category, error) {
-	target, ok := catMap[upstreamCategoryID]
-	if !ok {
+	if upstreamCategoryID == 0 {
 		return nil, fmt.Errorf("upstream category %d not found", upstreamCategoryID)
 	}
-
-	// 如果上游分类有父分类，先确保父分类存在
-	var localParentID uint
-	if target.ParentID > 0 {
-		if parent, parentOK := catMap[target.ParentID]; parentOK {
-			parentCat, parentErr := s.findOrCreateLocalCategory(parent.Slug, parent.Name, 0)
-			if parentErr != nil {
-				return nil, fmt.Errorf("create parent category: %w", parentErr)
-			}
-			localParentID = parentCat.ID
+	// 先收集完整祖先链，再从上到下创建；超出三级时不留下截断的分类树。
+	chain := make([]upstream.UpstreamCategory, 0, categorydomain.MaxDepth)
+	seen := make(map[uint]bool)
+	for id := upstreamCategoryID; id > 0; {
+		if seen[id] || len(chain) >= categorydomain.MaxDepth {
+			return nil, categoryapp.ErrParentInvalid
 		}
+		target, ok := catMap[id]
+		if !ok {
+			return nil, fmt.Errorf("upstream category %d not found", id)
+		}
+		seen[id] = true
+		chain = append(chain, target)
+		id = target.ParentID
 	}
 
-	return s.findOrCreateLocalCategory(target.Slug, target.Name, localParentID)
+	var category *categorydomain.Category
+	var parentID uint
+	for i := len(chain) - 1; i >= 0; i-- {
+		var err error
+		category, err = s.findOrCreateLocalCategory(chain[i].Slug, chain[i].Name, parentID)
+		if err != nil {
+			return nil, err
+		}
+		parentID = category.ID
+	}
+	return category, nil
 }
 
 // findOrCreateLocalCategory 按 slug 查找或创建本地分类
@@ -242,6 +254,15 @@ func (s *Service) findOrCreateLocalCategory(slug string, nameJSON jsonmap.JSON, 
 		return nil, err
 	}
 	if deleted != nil {
+		categories, listErr := s.categories.List()
+		if listErr != nil {
+			return nil, listErr
+		}
+		// 恢复与新建共用层级规则，避免旧分类被恢复到第四层。
+		categories = append(categories, *deleted)
+		if !categorydomain.CanSetParent(categories, deleted.ID, parentID) {
+			return nil, categoryapp.ErrParentInvalid
+		}
 		deleted.ParentID = parentID
 		deleted.NameJSON = nameJSON
 		deleted.IsActive = true

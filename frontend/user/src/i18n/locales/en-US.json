@@ -1,5 +1,6 @@
 {
   "common": {
+    "close": "Close",
     "siteName": "Dujiao-Next",
     "loading": "Loading...",
     "error": "Error",
@@ -144,6 +145,8 @@
     }
   },
   "products": {
+    "browseCategories": "Browse categories",
+    "toggleCategory": "Expand or collapse {name}",
     "subtitle": "Browse our featured products",
     "priceAria": "Price {price}",
     "promotionPriceAria": "Promotional price {price}",

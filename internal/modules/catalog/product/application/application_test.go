@@ -94,6 +94,7 @@ func TestListPublicForTenantBuildsVisibilityFilterBeforePagination(t *testing.T)
 			{ID: 10, IsActive: true},
 			{ID: 11, ParentID: 10, IsActive: true},
 			{ID: 12, ParentID: 10, IsActive: false},
+			{ID: 13, ParentID: 11, IsActive: true},
 		},
 	}
 	service := NewService(Options{Products: products, Categories: categories})
@@ -116,8 +117,8 @@ func TestListPublicForTenantBuildsVisibilityFilterBeforePagination(t *testing.T)
 	if total != 2 {
 		t.Fatalf("total want 2 got %d", total)
 	}
-	if !reflect.DeepEqual(products.filter.CategoryIDs, []uint{10, 11}) {
-		t.Fatalf("category ids want [10 11] got %v", products.filter.CategoryIDs)
+	if !reflect.DeepEqual(products.filter.CategoryIDs, []uint{10, 11, 13}) {
+		t.Fatalf("category ids want [10 11 13] got %v", products.filter.CategoryIDs)
 	}
 	if !reflect.DeepEqual(products.filter.ExcludeProductIDs, []uint{7, 8}) {
 		t.Fatalf("excluded product ids want [7 8] got %v", products.filter.ExcludeProductIDs)

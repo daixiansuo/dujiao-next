@@ -2,6 +2,7 @@ package categoryintegrationtest
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -82,10 +83,11 @@ func TestCategoryServiceCreateSupportsSecondLevelCategory(t *testing.T) {
 	}
 }
 
-func TestCategoryServiceCreateRejectsMissingOrSecondLevelParent(t *testing.T) {
+func TestCategoryServiceCreateSupportsThirdLevelAndRejectsFourthLevel(t *testing.T) {
 	svc, db := newCategoryServiceForTest(t)
 	parent := createCategoryFixture(t, db, "games", 0)
 	child := createCategoryFixture(t, db, "steam", parent.ID)
+	createProductFixture(t, db, child.ID, "legacy-second-level-product")
 
 	_, err := svc.Create(categoryapp.UpsertInput{
 		ParentID: 9999,
@@ -96,13 +98,26 @@ func TestCategoryServiceCreateRejectsMissingOrSecondLevelParent(t *testing.T) {
 		t.Fatalf("expected ErrCategoryParentInvalid for missing parent, got %v", err)
 	}
 
-	_, err = svc.Create(categoryapp.UpsertInput{
+	third, err := svc.Create(categoryapp.UpsertInput{
 		ParentID: child.ID,
 		Slug:     "steam-gift-card",
 		NameJSON: map[string]interface{}{"zh-CN": "steam-gift-card"},
 	})
+	if err != nil || third.ParentID != child.ID {
+		t.Fatalf("create third-level category: category=%+v err=%v", third, err)
+	}
+	var legacyProduct productdomain.Product
+	if err := db.First(&legacyProduct).Error; err != nil || legacyProduct.CategoryID != child.ID {
+		t.Fatalf("adding a child must retain legacy product assignment: product=%+v err=%v", legacyProduct, err)
+	}
+
+	_, err = svc.Create(categoryapp.UpsertInput{
+		ParentID: third.ID,
+		Slug:     "fourth-level",
+		NameJSON: map[string]interface{}{"zh-CN": "fourth-level"},
+	})
 	if err != categoryapp.ErrParentInvalid {
-		t.Fatalf("expected ErrCategoryParentInvalid for second-level parent, got %v", err)
+		t.Fatalf("expected ErrCategoryParentInvalid for fourth-level category, got %v", err)
 	}
 }
 
@@ -110,7 +125,8 @@ func TestCategoryServiceUpdateRejectsInvalidParentAssignment(t *testing.T) {
 	svc, db := newCategoryServiceForTest(t)
 	rootA := createCategoryFixture(t, db, "games", 0)
 	rootB := createCategoryFixture(t, db, "cards", 0)
-	_ = createCategoryFixture(t, db, "steam", rootA.ID)
+	child := createCategoryFixture(t, db, "steam", rootA.ID)
+	_ = createCategoryFixture(t, db, "steam-gift-card", child.ID)
 
 	_, err := svc.Update(fmt.Sprintf("%d", rootA.ID), categoryapp.UpsertInput{
 		ParentID: rootA.ID,
@@ -127,7 +143,38 @@ func TestCategoryServiceUpdateRejectsInvalidParentAssignment(t *testing.T) {
 		NameJSON: map[string]interface{}{"zh-CN": rootA.Slug},
 	})
 	if err != categoryapp.ErrParentInvalid {
-		t.Fatalf("expected ErrCategoryParentInvalid when moving parent with children, got %v", err)
+		t.Fatalf("expected ErrCategoryParentInvalid when moving a branch beyond three levels, got %v", err)
+	}
+	_, err = svc.Update(fmt.Sprintf("%d", rootA.ID), categoryapp.UpsertInput{
+		ParentID: child.ID,
+		Slug:     rootA.Slug,
+		NameJSON: map[string]interface{}{"zh-CN": rootA.Slug},
+	})
+	if err != categoryapp.ErrParentInvalid {
+		t.Fatalf("expected ErrCategoryParentInvalid for descendant parent, got %v", err)
+	}
+}
+
+func TestCategoryServiceUpdateMovesTwoLevelBranchAndPromotesLeaf(t *testing.T) {
+	svc, db := newCategoryServiceForTest(t)
+	root := createCategoryFixture(t, db, "games", 0)
+	child := createCategoryFixture(t, db, "steam", root.ID)
+	destination := createCategoryFixture(t, db, "digital", 0)
+
+	moved, err := svc.Update(fmt.Sprint(root.ID), categoryapp.UpsertInput{
+		ParentID: destination.ID,
+		Slug:     root.Slug,
+		NameJSON: map[string]interface{}{"zh-CN": root.Slug},
+	})
+	if err != nil || moved.ParentID != destination.ID {
+		t.Fatalf("move two-level branch within three levels: category=%+v err=%v", moved, err)
+	}
+	promoted, err := svc.Update(fmt.Sprint(child.ID), categoryapp.UpsertInput{
+		Slug:     child.Slug,
+		NameJSON: map[string]interface{}{"zh-CN": child.Slug},
+	})
+	if err != nil || promoted.ParentID != 0 {
+		t.Fatalf("promote third-level leaf to root: category=%+v err=%v", promoted, err)
 	}
 }
 
@@ -175,5 +222,21 @@ func TestCategoryServiceListSortOrderDescending(t *testing.T) {
 	}
 	if rows[0].Slug != "high" || rows[1].Slug != "low" {
 		t.Fatalf("expected high sort_order first, got %s then %s", rows[0].Slug, rows[1].Slug)
+	}
+}
+
+func TestCategoryTreeHelpersHandleMissingIDsAndCycles(t *testing.T) {
+	if got := categorydomain.DescendantIDs(nil, 42); !reflect.DeepEqual(got, []uint{42}) {
+		t.Fatalf("missing category must retain its query ID, got %v", got)
+	}
+	if got := categorydomain.DescendantIDs(nil, 0); len(got) != 0 {
+		t.Fatalf("empty category filter must remain empty, got %v", got)
+	}
+	cycle := []categorydomain.Category{{ID: 1, ParentID: 3}, {ID: 2, ParentID: 1}, {ID: 3, ParentID: 2}}
+	if got := categorydomain.DescendantIDs(cycle, 1); !reflect.DeepEqual(got, []uint{1, 2, 3}) {
+		t.Fatalf("query traversal must terminate and avoid duplicate IDs, got %v", got)
+	}
+	if categorydomain.CanSetParent(cycle, 0, 1) || categorydomain.CanSetParent(cycle, 1, 0) {
+		t.Fatal("cyclic branch must not be accepted as a parent or moved intact")
 	}
 }

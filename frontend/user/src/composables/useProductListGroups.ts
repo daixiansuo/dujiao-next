@@ -1,5 +1,5 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
-import { normalizeCategoryParentId, type PublicCategory } from '../utils/category'
+import { getRootCategory, type PublicCategory } from '../utils/category'
 import { useLocalized } from './useProduct'
 import { useI18n } from 'vue-i18n'
 
@@ -34,15 +34,10 @@ export function useProductListGroups(
       if (directCatId !== null) {
         const catEntry = catMap.get(directCatId)
         if (catEntry) {
-          const parentId = normalizeCategoryParentId(catEntry.parent_id)
-          if (parentId > 0) {
-            const parentEntry = catMap.get(parentId)
-            if (parentEntry) {
-              groupCatId = parentEntry.id
-              groupName = getLocalizedText(parentEntry.name)
-              groupIcon = parentEntry.icon ?? null
-            }
-          }
+          const root = getRootCategory(catEntry, catMap)
+          groupCatId = root.id
+          groupName = getLocalizedText(root.name)
+          groupIcon = root.icon ?? null
         }
       }
 

@@ -6,6 +6,7 @@ package integrationtest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -19,7 +20,10 @@ import (
 	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 
+	categoryapp "github.com/dujiao-next/internal/modules/catalog/category/application"
 	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
+	categorygormstore "github.com/dujiao-next/internal/modules/catalog/category/infrastructure/gormstore"
+	productapp "github.com/dujiao-next/internal/modules/catalog/product/application"
 
 	"github.com/dujiao-next/internal/constants"
 	productgormstore "github.com/dujiao-next/internal/modules/catalog/product/store/gormstore"
@@ -34,6 +38,49 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestPostgresThirdLevelCategoriesAndParentPagination(t *testing.T) {
+	db := setupPostgresIntegrationDB(t)
+	categories := categorygormstore.NewCategoryStore(db)
+	categoryService := categoryapp.NewService(categories)
+	var parentID uint
+	var chain []*categorydomain.Category
+	for _, slug := range []string{"accounts", "facebook", "old-accounts"} {
+		category, err := categoryService.Create(categoryapp.UpsertInput{ParentID: parentID, Slug: slug, NameJSON: map[string]interface{}{"zh-CN": slug}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chain = append(chain, category)
+		parentID = category.ID
+	}
+	if _, err := categoryService.Create(categoryapp.UpsertInput{ParentID: parentID, Slug: "fourth", NameJSON: map[string]interface{}{"zh-CN": "第四级"}}); !errors.Is(err, categoryapp.ErrParentInvalid) {
+		t.Fatalf("expected fourth category level rejected, got %v", err)
+	}
+	products := productgormstore.NewProductStore(db)
+	for i, category := range chain {
+		product := productdomain.Product{CategoryID: category.ID, Slug: category.Slug + "-product", TitleJSON: jsonmap.JSON{"zh-CN": category.Slug}, IsActive: true, SortOrder: i}
+		if err := products.Create(&product); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := productapp.NewService(productapp.Options{Products: products, Categories: categories})
+	for _, tc := range []struct {
+		categoryID uint
+		total      int64
+		page       int
+		slug       string
+	}{
+		{chain[0].ID, 3, 1, "old-accounts-product"},
+		{chain[0].ID, 3, 2, "facebook-product"},
+		{chain[1].ID, 2, 2, "facebook-product"},
+		{chain[2].ID, 1, 1, "old-accounts-product"},
+	} {
+		rows, total, err := service.ListPublic(fmt.Sprint(tc.categoryID), "", tc.page, 1)
+		if err != nil || total != tc.total || len(rows) != 1 || rows[0].Slug != tc.slug {
+			t.Fatalf("category=%d page=%d: rows=%v total=%d err=%v", tc.categoryID, tc.page, rows, total, err)
+		}
+	}
+}
 
 // setupPostgresIntegrationDB 初始化 PostgreSQL 集成测试数据库。
 func setupPostgresIntegrationDB(t *testing.T) *gorm.DB {

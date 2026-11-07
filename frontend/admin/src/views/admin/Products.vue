@@ -583,11 +583,11 @@ watch(
             <SelectContent>
               <SelectItem value="all">{{ t('admin.products.filters.categoryAll') }}</SelectItem>
               <SelectItem
-                v-for="item in flattenAdminCategories(categories).map(i => ({ ...i, selectable: isAdminProductCategorySelectable(i.category, categoryChildCountMap) }))"
+                v-for="item in flattenAdminCategories(categories)"
                 :key="item.category.id"
                 :value="String(item.category.id)"
-                :disabled="!item.selectable"
-                :class="item.depth > 0 ? 'pl-5' : ''"
+                class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }"
               >
                 {{ buildAdminCategoryPath(item.category, categoryMap, (c) => getLocalizedText(c.name)) }}
               </SelectItem>
@@ -639,7 +639,8 @@ watch(
                 :key="item.category.id"
                 :value="String(item.category.id)"
                 :disabled="!item.selectable"
-                :class="item.depth > 0 ? 'pl-5' : ''"
+                class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }"
               >
                 {{ buildAdminCategoryPath(item.category, categoryMap, (c) => getLocalizedText(c.name)) }}
               </SelectItem>
@@ -768,9 +769,10 @@ watch(
                       :key="item.category.id"
                       :value="String(item.category.id)"
                       :disabled="!item.selectable"
-                      :class="item.depth > 0 ? 'pl-6' : ''"
+                      class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }"
                     >
-                      {{ item.depth > 0 ? getLocalizedText(item.category.name) : getProductCategoryLabel(item.category) }}
+                      {{ getProductCategoryLabel(item.category) }}
                     </SelectItem>
                   </SelectContent>
                 </Select>

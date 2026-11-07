@@ -1,5 +1,7 @@
 import type { AdminCategory } from '@/api/types'
 
+export const MAX_PRODUCT_CATEGORY_LEVELS = 3
+
 export interface AdminCategoryHierarchyItem {
   category: AdminCategory
   depth: number
@@ -46,7 +48,7 @@ export const flattenAdminCategories = (categories: AdminCategory[]): AdminCatego
     visited.add(category.id)
     result.push({
       category,
-      depth: Math.min(depth, 1),
+      depth,
       parent,
     })
 
@@ -72,19 +74,37 @@ export const flattenAdminCategories = (categories: AdminCategory[]): AdminCatego
   return result
 }
 
-export const buildAdminCategoryPath = (
-  category: AdminCategory | null | undefined,
-  categoryMap: Map<number, AdminCategory>,
-  getLabel: (category: AdminCategory) => string
+export const buildAdminCategoryPath = <T extends { id: number; parent_id: number }>(
+  category: T | null | undefined,
+  categoryMap: Map<number, T>,
+  getLabel: (category: T) => string
 ) => {
-  if (!category) return ''
-  const current = getLabel(category)
-  if (!category.parent_id) return current
+  const labels: string[] = []
+  const visited = new Set<number>()
+  let current = category
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+    labels.unshift(getLabel(current))
+    current = categoryMap.get(current.parent_id)
+  }
+  return labels.join(' / ')
+}
 
-  const parent = categoryMap.get(category.parent_id)
-  if (!parent) return current
-
-  return `${getLabel(parent)} / ${current}`
+export const getAdminCategoryParentOptions = (categories: AdminCategory[], categoryID = 0) => {
+  const items = flattenAdminCategories(categories)
+  const descendants = new Set<number>()
+  let subtreeHeight = 1
+  const visit = (id: number, height: number) => {
+    if (descendants.has(id)) return
+    descendants.add(id)
+    subtreeHeight = Math.max(subtreeHeight, height)
+    for (const category of categories) {
+      if (category.parent_id === id) visit(category.id, height + 1)
+    }
+  }
+  if (categoryID > 0) visit(categoryID, 1)
+  return items.filter(item => !descendants.has(item.category.id)
+    && item.depth + 1 + subtreeHeight <= MAX_PRODUCT_CATEGORY_LEVELS)
 }
 
 export const isAdminProductCategorySelectable = (
