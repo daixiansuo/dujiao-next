@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/dujiao-next/internal/i18n"
+	categoryapp "github.com/dujiao-next/internal/modules/catalog/category/application"
 	mappingapp "github.com/dujiao-next/internal/modules/catalog/mapping/application"
 	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
@@ -51,6 +53,11 @@ func (h *AdminHandler) GetProductMappings(c *gin.Context) {
 	page, pageSize := ginutil.ParsePagination(c)
 
 	connectionID, _ := ginutil.ParseQueryUint(c.Query("connection_id"), false)
+	categoryID, err := ginutil.ParseQueryUint(c.Query("category_id"), false)
+	if err != nil {
+		ginutil.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
 	upstreamStatus := c.Query("upstream_status")
 	if upstreamStatus != "" {
 		validStatuses := map[string]bool{
@@ -72,6 +79,7 @@ func (h *AdminHandler) GetProductMappings(c *gin.Context) {
 
 	mappings, total, err := h.service.List(mappingcontract.ListFilter{
 		ConnectionID:   connectionID,
+		CategoryID:     categoryID,
 		UpstreamStatus: upstreamStatus,
 		ProductStatus:  productStatus,
 		Search:         search,
@@ -143,6 +151,10 @@ func (h *AdminHandler) ImportUpstreamProduct(c *gin.Context) {
 		req.AutoCreateCategory,
 	)
 	if err != nil {
+		if errors.Is(err, categoryapp.ErrParentInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.category_parent_invalid", nil)
+			return
+		}
 		if errors.Is(err, mappingcontract.ErrMappingAlreadyExists) {
 			ginutil.RespondError(c, response.CodeBadRequest, "error.mapping_already_exists", nil)
 			return
@@ -218,6 +230,9 @@ func (h *AdminHandler) BatchImportUpstreamProducts(c *gin.Context) {
 		item := BatchImportUpstreamProductResult{UpstreamProductID: o.UpstreamProductID}
 		if o.Err != nil {
 			item.Error = o.Err.Error()
+			if errors.Is(o.Err, categoryapp.ErrParentInvalid) {
+				item.Error = i18n.T(i18n.ResolveLocale(c), "error.category_parent_invalid")
+			}
 		} else {
 			item.Success = true
 			successCount++
@@ -472,6 +487,10 @@ func (h *AdminHandler) BatchImportByCategory(c *gin.Context) {
 		req.LocalCategoryID,
 	)
 	if err != nil {
+		if errors.Is(err, categoryapp.ErrParentInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.category_parent_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return

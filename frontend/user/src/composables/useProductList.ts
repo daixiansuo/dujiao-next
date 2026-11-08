@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { productAPI, categoryAPI } from '../api'
-import { buildCategoryGroups, createCategoryMap, normalizeCategoryParentId, type PublicCategory } from '../utils/category'
+import { buildCategoryGroups, createCategoryMap, getCategoryAncestors, type PublicCategory } from '../utils/category'
 import { debounceAsync } from '../utils/debounce'
 import { resetListScrollSignal, resolveListScrollSignal } from '../utils/listScrollSignal'
 
@@ -70,15 +70,11 @@ export function useProductList(options: UseProductListOptions = {}) {
     const matched = categoryMap.value.get(selectedCategory.value)
     if (!matched) return
 
-    const parentId = normalizeCategoryParentId(matched.parent_id)
-    if (parentId > 0) {
-      expandParentCategory(parentId)
-      return
+    for (const ancestor of getCategoryAncestors(matched, categoryMap.value)) {
+      expandParentCategory(ancestor.id)
     }
-
-    const selectedGroup = categoryGroups.value.find((group) => group.id === matched.id)
-    if (selectedGroup?.children.length) {
-      expandParentCategory(selectedGroup.id)
+    if (categories.value.some((category) => Number(category.parent_id) === matched.id)) {
+      expandParentCategory(matched.id)
     }
   }
 

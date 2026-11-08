@@ -1,5 +1,6 @@
 import { api } from './client'
 import type {
+  AdminBackupConfigUpdate,
   AdminCategory,
   AdminProduct,
   AdminFulfillment,
@@ -375,6 +376,7 @@ export const adminAPI = {
   batchUpdateProductCategory: (ids: number[], categoryId: number) => api.post('/admin/products/batch-category', { ids, category_id: categoryId }),
   batchUpdateProductStockDisplay: (ids: number[], stockDisplayMode: string) =>
     api.post('/admin/products/batch-stock-display', { ids, stock_display_mode: stockDisplayMode }),
+  batchUpdateProductImages: (ids: number[], images: string[]) => api.post('/admin/products/batch-images', { ids, images }),
   batchDeleteProducts: (ids: number[]) => api.post('/admin/products/batch-delete', { ids }),
   getCategories: (params?: Record<string, unknown>) => api.get('/admin/categories', { params }),
   createCategory: (data: Partial<AdminCategory>) => api.post('/admin/categories', data),
@@ -394,6 +396,14 @@ export const adminAPI = {
   deleteBanner: (id: number) => api.delete(`/admin/banners/${id}`),
   getSettings: (params?: Record<string, unknown>) => api.get('/admin/settings', { params }),
   updateSettings: (data: Record<string, unknown>) => api.put('/admin/settings', data),
+  getBackupConfig: () => api.get('/admin/backups/config'),
+  updateBackupConfig: (data: AdminBackupConfigUpdate) => api.put('/admin/backups/config', data),
+  testBackupConnection: () => api.post('/admin/backups/test'),
+  getBackupStatus: () => api.get('/admin/backups/status'),
+  getBackupRecords: (params: { page: number; page_size: number }) => api.get('/admin/backups/records', { params }),
+  createBackup: () => api.post('/admin/backups/records', {}),
+  getBackupDownload: (id: string) => api.post(`/admin/backups/records/${encodeURIComponent(id)}/download`),
+  deleteBackup: (id: string) => api.delete(`/admin/backups/records/${encodeURIComponent(id)}`),
   getHomeAnnouncement: () => api.get('/admin/settings', { params: { key: 'home_announcement' } }),
   updateHomeAnnouncement: (value: Record<string, unknown>) => api.put('/admin/settings', { key: 'home_announcement', value }),
   getSMTPSettings: () => api.get('/admin/settings/smtp'),
@@ -668,12 +678,6 @@ export const adminAPI = {
   deleteTelegramBroadcast: (id: number) => api.delete(`/admin/telegram-bot/broadcasts/${id}`),
   getTelegramBroadcastUsers: (params?: Record<string, unknown>) =>
     api.get('/admin/telegram-bot/users', { params }),
-
-  // 广告代理
-  renderAdSlot: (slotCode: string, params?: Record<string, string>) =>
-    api.get(`/admin/ads/render/${slotCode}`, { params }),
-  reportAdImpression: (data: { tenant: string; client: string; slot_code: string; items: { ad_id: number; impression_token: string }[] }) =>
-    api.post('/admin/ads/impression', data),
 
   // 文章分类
   getPostCategories: (params?: Record<string, unknown>) => api.get('/admin/post-categories', { params }),

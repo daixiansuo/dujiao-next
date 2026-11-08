@@ -44,6 +44,34 @@ func (r *ProductStore) Transaction(fn func(tx *gorm.DB) error) error {
 
 // List 商品列表
 func (r *ProductStore) List(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	return r.list(filter, "sort_order DESC, created_at DESC")
+}
+
+// ListForStorefront 按权重、列表展示售价、创建时间排序主站前台商品。
+func (r *ProductStore) ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	// 展示售价沿用首个启用规格（规格权重降序、ID 升序），无规格时回落到商品售价。
+	return r.list(filter, `products.sort_order DESC,
+		COALESCE((
+			SELECT ps.price_amount FROM product_skus ps
+			WHERE ps.product_id = products.id AND ps.deleted_at IS NULL AND ps.is_active = true
+			ORDER BY ps.sort_order DESC, ps.id ASC LIMIT 1
+		), products.price_amount) ASC,
+		products.created_at DESC, products.id DESC`)
+}
+
+// ListForResellerStorefront 按权重、主站基础展示售价、创建时间排序分销前台商品。
+func (r *ProductStore) ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	// 排序使用主站首个启用规格的基础售价；分销加价和隐藏 SKU 后的展示价仍由原流程计算。
+	return r.list(filter, `products.sort_order DESC,
+		COALESCE((
+			SELECT ps.price_amount FROM product_skus ps
+			WHERE ps.product_id = products.id AND ps.deleted_at IS NULL AND ps.is_active = true
+			ORDER BY ps.sort_order DESC, ps.id ASC LIMIT 1
+		), products.price_amount) ASC,
+		products.created_at DESC, products.id DESC`)
+}
+
+func (r *ProductStore) list(filter productcontract.ListFilter, order string) ([]productdomain.Product, int64, error) {
 	var products []productdomain.Product
 
 	query := r.db.Model(&productdomain.Product{}).Where("products.deleted_at IS NULL")
@@ -121,7 +149,7 @@ func (r *ProductStore) List(filter productcontract.ListFilter) ([]productdomain.
 
 	query = gormutil.ApplyPagination(query, filter.Page, filter.PageSize)
 
-	if err := query.Order("sort_order DESC, created_at DESC").Find(&products).Error; err != nil {
+	if err := query.Order(order).Find(&products).Error; err != nil {
 		return nil, 0, err
 	}
 

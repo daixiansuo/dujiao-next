@@ -17,14 +17,32 @@ import (
 )
 
 type productRepositoryStub struct {
-	filter  productcontract.ListFilter
-	rows    []productdomain.Product
-	total   int64
-	bySlug  *productdomain.Product
-	byAdmin *productdomain.Product
+	storefront         bool
+	resellerStorefront bool
+	filter             productcontract.ListFilter
+	rows               []productdomain.Product
+	total              int64
+	bySlug             *productdomain.Product
+	byAdmin            *productdomain.Product
 }
 
 func (stub *productRepositoryStub) List(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	stub.storefront = false
+	stub.resellerStorefront = false
+	stub.filter = filter
+	return stub.rows, stub.total, nil
+}
+
+func (stub *productRepositoryStub) ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	stub.storefront = true
+	stub.resellerStorefront = false
+	stub.filter = filter
+	return stub.rows, stub.total, nil
+}
+
+func (stub *productRepositoryStub) ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error) {
+	stub.storefront = false
+	stub.resellerStorefront = true
 	stub.filter = filter
 	return stub.rows, stub.total, nil
 }
@@ -76,6 +94,7 @@ func TestListPublicForTenantBuildsVisibilityFilterBeforePagination(t *testing.T)
 			{ID: 10, IsActive: true},
 			{ID: 11, ParentID: 10, IsActive: true},
 			{ID: 12, ParentID: 10, IsActive: false},
+			{ID: 13, ParentID: 11, IsActive: true},
 		},
 	}
 	service := NewService(Options{Products: products, Categories: categories})
@@ -92,11 +111,14 @@ func TestListPublicForTenantBuildsVisibilityFilterBeforePagination(t *testing.T)
 	if err != nil {
 		t.Fatalf("ListPublicForTenant returned error: %v", err)
 	}
+	if !products.resellerStorefront || products.storefront {
+		t.Fatal("reseller list must use the dedicated reseller storefront query")
+	}
 	if total != 2 {
 		t.Fatalf("total want 2 got %d", total)
 	}
-	if !reflect.DeepEqual(products.filter.CategoryIDs, []uint{10, 11}) {
-		t.Fatalf("category ids want [10 11] got %v", products.filter.CategoryIDs)
+	if !reflect.DeepEqual(products.filter.CategoryIDs, []uint{10, 11, 13}) {
+		t.Fatalf("category ids want [10 11 13] got %v", products.filter.CategoryIDs)
 	}
 	if !reflect.DeepEqual(products.filter.ExcludeProductIDs, []uint{7, 8}) {
 		t.Fatalf("excluded product ids want [7 8] got %v", products.filter.ExcludeProductIDs)
@@ -146,5 +168,52 @@ func TestApplyAutoStockCountsAssignsLegacyStockToOneSKU(t *testing.T) {
 	}
 	if products[0].SKUs[1].AutoStockAvailable != 5 {
 		t.Fatalf("DEFAULT SKU available want 5 got %d", products[0].SKUs[1].AutoStockAvailable)
+	}
+}
+
+func TestListPublicForMainTenantUsesStorefrontQuery(t *testing.T) {
+	products := &productRepositoryStub{rows: []productdomain.Product{{ID: 1}}, total: 1}
+	categories := categoryRepositoryStub{
+		byID: map[string]*categorydomain.Category{"10": {ID: 10, IsActive: true}},
+		rows: []categorydomain.Category{{ID: 10, IsActive: true}, {ID: 11, ParentID: 10, IsActive: true}},
+	}
+	service := NewService(Options{Products: products, Categories: categories})
+	rows, total, err := service.ListPublicForTenant(resellercontract.TenantContext{IsMain: true}, nil, "10", "keyword", 2, 20)
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].ID != 1 {
+		t.Fatalf("storefront query result: rows=%v total=%d err=%v", rows, total, err)
+	}
+	if !products.storefront || products.resellerStorefront {
+		t.Fatal("main storefront must use the storefront query")
+	}
+	filter := products.filter
+	if filter.CategoryID != "10" || !reflect.DeepEqual(filter.CategoryIDs, []uint{10, 11}) || filter.Search != "keyword" ||
+		filter.Page != 2 || filter.PageSize != 20 || !filter.OnlyActive || !filter.WithCategory || len(filter.ExcludeProductIDs) != 0 {
+		t.Fatalf("unexpected storefront filter: %#v", filter)
+	}
+}
+
+func TestOtherProductQueriesRetainExistingList(t *testing.T) {
+	for _, name := range []string{"public", "exact", "upstream", "admin"} {
+		t.Run(name, func(t *testing.T) {
+			products := &productRepositoryStub{}
+			service := NewService(Options{Products: products})
+			var err error
+			switch name {
+			case "public":
+				_, _, err = service.ListPublic("", "", 1, 20)
+			case "exact":
+				_, _, err = service.ListPublicExact("", 1, 20)
+			case "upstream":
+				_, _, err = service.ListForUpstreamSync(nil, true, 1, 20)
+			case "admin":
+				_, _, err = service.ListAdmin("", "", "", "", nil, nil, 0, 1, 20)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if products.storefront || products.resellerStorefront || products.filter.PageSize != 20 {
+				t.Fatalf("%s must use the original list query, got %#v", name, products)
+			}
+		})
 	}
 }

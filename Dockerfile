@@ -3,6 +3,9 @@
 # 单镜像全栈构建：admin + user 两个 SPA 编译后由 go:embed 打进同一个二进制，
 # 由同一个进程在同一端口（8080）提供服务。不再需要独立的前端容器与 nginx。
 
+# Match production PostgreSQL for dump/restore compatibility.
+ARG POSTGRES_MAJOR=16
+
 # ---- 阶段 1：构建两个前端 ----
 # 固定在构建机原生架构上跑（前端产物与目标架构无关），避免 buildx 多平台构建时
 # 在 QEMU 模拟的 arm64 下重跑一遍 Node —— 那样构建耗时会差一个数量级。
@@ -57,7 +60,7 @@ RUN set -eux; \
     go build -trimpath -tags release,fullstack -ldflags="-s -w -X github.com/dujiao-next/internal/version.Version=${APP_VERSION} -X github.com/dujiao-next/internal/version.BuildType=release" -o /out/dujiao-next ./cmd/server
 
 # ---- 阶段 3：运行时 ----
-FROM alpine:latest
+FROM postgres:${POSTGRES_MAJOR}-alpine
 
 WORKDIR /app
 
@@ -69,4 +72,6 @@ COPY config.yml.example /app/config.yml.example
 
 EXPOSE 8080
 
+# Run only the application; do not invoke the inherited database initializer.
+ENTRYPOINT []
 CMD ["./dujiao-next"]

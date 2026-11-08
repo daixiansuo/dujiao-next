@@ -573,6 +573,9 @@ export interface AdminSiteConnection {
   last_ping_at?: string
   last_ping_status?: string
   exchange_rate?: number
+  price_markup_mode?: 'percent' | 'fixed_amount' | 'segmented'
+  price_markup_threshold?: string
+  price_markup_amount?: string
   price_markup_percent?: number
   price_rounding_mode?: string
   auto_sync_price?: boolean
@@ -732,38 +735,6 @@ export interface AdminDashboardInventoryAlert {
   fulfillment_type: string
   alert_type: string
   available_stock: number
-}
-
-// --- Ad Proxy ---
-export interface AdRenderSlotDTO {
-  code: string
-  scene: string
-  layout: string
-  render_mode: string
-  max_items: number
-}
-
-export interface AdRenderItemDTO {
-  id: number
-  advertiser_name: string
-  title: string
-  subtitle: string
-  cta_label: string
-  badge: string
-  image: string
-  mobile_image: string
-  icon: string
-  link_type: string
-  open_in_new_tab: boolean
-  theme: string
-  dismissible: boolean
-  click_url: string
-  impression_token: string
-}
-
-export interface AdRenderResponse {
-  slot: AdRenderSlotDTO
-  items: AdRenderItemDTO[]
 }
 
 // --- Affiliate ---
@@ -1233,4 +1204,58 @@ export interface AdminResellerOperationsFinance {
     negative_balance_accounts: number
     frozen_balance_accounts: number
   }>
+}
+
+export interface AdminBackupConfig {
+  endpoint: string
+  bucket: string
+  access_key_id: string
+  secret_access_key?: string
+  secret_configured: boolean
+  prefix: string
+  enabled: boolean
+  daily_time: string
+  timezone: string
+  retain_count: number
+}
+
+export type AdminBackupConfigUpdate = Omit<AdminBackupConfig, 'secret_configured' | 'secret_access_key'> & {
+  secret_access_key: string
+}
+
+export interface AdminBackupRecord {
+  id: string
+  source: 'manual' | 'scheduled'
+  admin_id: number
+  status: 'running' | 'succeeded' | 'failed'
+  stage: 'exporting' | 'uploading' | ''
+  filename: string
+  size: number
+  sha256: string
+  endpoint: string
+  bucket: string
+  object_key: string
+  error: string
+  created_at: string
+  started_at: string
+  finished_at?: string | null
+}
+
+export interface AdminBackupStatus {
+  supported: boolean
+  ready: boolean
+  pg_dump_version: string
+  server_version: string
+  error: string
+  current?: AdminBackupRecord | null
+  next_run?: string | null
+  last_success?: AdminBackupRecord | null
+  cleanup_error?: string
+}
+
+export interface AdminBackupRecordsPage {
+  items: AdminBackupRecord[]
+  total: number
+  page: number
+  page_size: number
 }

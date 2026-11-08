@@ -130,6 +130,8 @@ func normalizeSiteContact(raw interface{}) map[string]interface{} {
 	result := map[string]interface{}{
 		"telegram": "",
 		"whatsapp": "",
+		"email":    "",
+		"x":        "",
 	}
 	contactMap, ok := raw.(map[string]interface{})
 	if !ok {
@@ -137,6 +139,8 @@ func normalizeSiteContact(raw interface{}) map[string]interface{} {
 	}
 	result["telegram"] = normalizeSettingText(contactMap["telegram"])
 	result["whatsapp"] = normalizeSettingText(contactMap["whatsapp"])
+	result["email"] = strings.TrimPrefix(normalizeSettingText(contactMap["email"]), "mailto:")
+	result["x"] = normalizeSettingText(contactMap["x"])
 	return result
 }
 
@@ -157,6 +161,12 @@ func validateSiteSetting(value jsonmap.JSON) error {
 	}
 	if whatsApp, _ := contact["whatsapp"].(string); whatsApp != "" && !contactlink.IsWhatsApp(whatsApp) {
 		return &SettingFieldError{Field: "contact_whatsapp"}
+	}
+	if email, _ := contact["email"].(string); email != "" && !contactlink.IsEmail(email) {
+		return &SettingFieldError{Field: "contact_email"}
+	}
+	if x, _ := contact["x"].(string); x != "" && !contactlink.IsX(x) {
+		return &SettingFieldError{Field: "contact_x"}
 	}
 	return nil
 }

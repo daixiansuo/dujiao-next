@@ -32,7 +32,7 @@ const categoryOptions = computed(() => flattenAdminCategories(categories.value).
   selectable: isAdminProductCategorySelectable(item.category, categoryChildCountMap.value),
 })))
 const pagination = reactive({ page: 1, page_size: 20, total: 0, total_page: 1 })
-const filters = reactive({ connection_id: '__all__', upstream_status: '__all__', product_status: '__all__', search: '' })
+const filters = reactive({ connection_id: '__all__', category_id: '__all__', upstream_status: '__all__', product_status: '__all__', search: '' })
 const syncingId = ref<number | null>(null)
 
 // Expand detail
@@ -112,6 +112,10 @@ const expandedCategoryIds = ref<Set<number>>(new Set())
 const autoCreateCategory = ref(false)
 const categoryImporting = ref(false)
 
+watch(importViewMode, mode => {
+  if (mode === 'flat') autoCreateCategory.value = false
+})
+
 const normalizeFilterValue = (value: string) => (value === '__all__' ? '' : value)
 
 // --- List helpers ---
@@ -156,12 +160,6 @@ const getConnectionName = (connectionId: number) => {
 const getCategoryOptionLabel = (category: AdminCategory) => {
   return buildAdminCategoryPath(category, categoryMap.value, (item) => getLocalizedText(item.name))
 }
-
-const getCategoryOptionName = (category: AdminCategory) => {
-  return getLocalizedText(category.name)
-}
-
-
 
 // --- Detail expand ---
 
@@ -233,6 +231,7 @@ const fetchMappings = async (page = 1, options: ListFetchOptions = {}) => {
     const res = await adminAPI.getProductMappings({
       page, page_size: pagination.page_size,
       connection_id: connId || undefined,
+      category_id: normalizeFilterValue(filters.category_id) || undefined,
       upstream_status: us || undefined,
       product_status: ps || undefined,
       search: filters.search || undefined,
@@ -540,10 +539,7 @@ const categoryDisplayList = computed(() => {
     if (productCount === 0) continue  // Skip empty categories
 
     const loadedProducts = productsByCategory.value.get(cat.id) || []
-    const parentCat = cat.parent_id > 0 ? catMap.get(cat.parent_id) : undefined
-    const path = parentCat
-      ? `${getLocalizedText(parentCat.name)} / ${getLocalizedText(cat.name)}`
-      : getLocalizedText(cat.name)
+    const path = buildAdminCategoryPath(cat, catMap, item => getLocalizedText(item.name))
     // 未映射数量只能基于已加载商品估算；未全部加载时不能当作准确值展示/用于禁用按钮
     const fullyLoaded = loadedProducts.length >= productCount
     const loadedNonMapped = loadedProducts.filter(p => !mappedUpstreamIds.value.has(p.id)).length
@@ -599,7 +595,7 @@ const isCategoryAllSelected = (catId: number) => {
 const handleImportCategory = async (catId: number) => {
   if (!importConnectionId.value) return
   // Validate: must have autoCreateCategory or a selected local category
-  const localCatId = importCategoryId.value !== '__none__' ? Number(importCategoryId.value) : 0
+  const localCatId = !autoCreateCategory.value && importCategoryId.value !== '__none__' ? Number(importCategoryId.value) : 0
   if (!autoCreateCategory.value && localCatId === 0) {
     notifyError(t('productMappings.import.selectCategoryFirst'))
     return
@@ -650,7 +646,7 @@ const handleBatchImport = async () => {
   if (ids.length === 0) return
   importing.value = true
   importProgress.value = { done: 0, total: ids.length, success: 0 }
-  const categoryId = importCategoryId.value !== '__none__' ? Number(importCategoryId.value) : 0
+  const categoryId = !autoCreateCategory.value && importCategoryId.value !== '__none__' ? Number(importCategoryId.value) : 0
   const allResults: { upstream_product_id: number; success: boolean; error?: string }[] = []
   let successCount = 0
 
@@ -662,6 +658,7 @@ const handleBatchImport = async () => {
         const res = await adminAPI.batchImportUpstreamProducts({
           connection_id: Number(importConnectionId.value),
           upstream_product_ids: batchIds,
+          auto_create_category: autoCreateCategory.value,
           category_id: categoryId || undefined,
         })
         const result = res.data.data as { results?: typeof allResults; success_count?: number } | null
@@ -673,7 +670,7 @@ const handleBatchImport = async () => {
           // 后端不支持批量接口，逐条导入
           for (const id of batchIds) {
             try {
-              await adminAPI.importUpstreamProduct({ connection_id: Number(importConnectionId.value), upstream_product_id: id, category_id: categoryId || undefined })
+              await adminAPI.importUpstreamProduct({ connection_id: Number(importConnectionId.value), upstream_product_id: id, auto_create_category: autoCreateCategory.value, category_id: categoryId || undefined })
               allResults.push({ upstream_product_id: id, success: true }); successCount++
             } catch (singleErr: any) {
               allResults.push({ upstream_product_id: id, success: false, error: singleErr?.response?.data?.message || singleErr?.message })
@@ -735,6 +732,23 @@ onMounted(() => { fetchConnections(); fetchCategories(); fetchMappings() })
           <SelectContent>
             <SelectItem value="__all__">{{ t('productMappings.filter.allConnections') }}</SelectItem>
             <SelectItem v-for="conn in connections" :key="conn.id" :value="String(conn.id)">{{ conn.name }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select v-model="filters.category_id" @update:modelValue="handleFilterChange">
+          <SelectTrigger class="h-9 w-full sm:w-[220px]">
+            <SelectValue :placeholder="t('admin.products.filters.categoryPlaceholder')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">{{ t('admin.products.filters.categoryAll') }}</SelectItem>
+            <SelectItem
+              v-for="item in categoryOptions"
+              :key="item.category.id"
+              :value="String(item.category.id)"
+              class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }"
+            >
+              {{ getCategoryOptionLabel(item.category) }}
+            </SelectItem>
           </SelectContent>
         </Select>
         <div class="relative w-full sm:w-[220px]">
@@ -1035,9 +1049,10 @@ onMounted(() => { fetchConnections(); fetchCategories(); fetchMappings() })
                     :key="item.category.id"
                     :value="String(item.category.id)"
                     :disabled="!item.selectable"
-                    :class="item.depth > 0 ? 'pl-6' : ''"
+                    class="max-w-[calc(100vw-2rem)] [overflow-wrap:anywhere]"
+                    :style="{ paddingLeft: `${item.depth * 12 + 8}px` }"
                   >
-                    {{ item.depth > 0 ? getCategoryOptionName(item.category) : getCategoryOptionLabel(item.category) }}
+                    {{ getCategoryOptionLabel(item.category) }}
                   </SelectItem>
                 </SelectContent>
               </Select>

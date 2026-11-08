@@ -43,8 +43,7 @@ func (h *Handler) GetCategories(c *gin.Context) {
 
 	// 统计每个分类的直接商品数
 	directCounts := make(map[uint]int64, len(categories))
-	// 记录哪些 parentID 有子分类
-	hasChildren := make(map[uint]struct{})
+	childrenByParent := make(map[uint][]uint)
 	for _, cat := range categories {
 		count, err := h.CategoryRepo.CountActiveProducts(fmt.Sprintf("%d", cat.ID))
 		if err != nil {
@@ -53,32 +52,29 @@ func (h *Handler) GetCategories(c *gin.Context) {
 		}
 		directCounts[cat.ID] = count
 		if cat.ParentID != 0 {
-			hasChildren[cat.ParentID] = struct{}{}
+			childrenByParent[cat.ParentID] = append(childrenByParent[cat.ParentID], cat.ID)
 		}
 	}
 
-	// 从可见根分类向下遍历，保留完整层级；停用父分类的下级和孤立分类不暴露。
-	children := make(map[uint][]uint)
-	visibleIDs := make(map[uint]bool, len(categories))
-	var pending []uint
-	for _, cat := range categories {
-		children[cat.ParentID] = append(children[cat.ParentID], cat.ID)
-		if cat.ParentID == 0 {
-			count := directCounts[cat.ID]
-			_, hasChild := hasChildren[cat.ID]
-			if count > 0 || hasChild {
-				pending = append(pending, cat.ID)
-			}
-		}
-	}
-	for len(pending) > 0 {
-		id := pending[0]
-		pending = pending[1:]
+	// 保留原有空分类与直接商品数语义，返回可见一级分类下面的完整层级。
+	visibleIDs := make(map[uint]bool)
+	var includeBranch func(uint)
+	includeBranch = func(id uint) {
 		if visibleIDs[id] {
-			continue
+			return
 		}
 		visibleIDs[id] = true
-		pending = append(pending, children[id]...)
+		for _, childID := range childrenByParent[id] {
+			includeBranch(childID)
+		}
+	}
+	for _, cat := range categories {
+		if cat.ParentID == 0 {
+			count := directCounts[cat.ID]
+			if count > 0 || len(childrenByParent[cat.ID]) > 0 {
+				includeBranch(cat.ID)
+			}
+		}
 	}
 
 	var items []categoryItem

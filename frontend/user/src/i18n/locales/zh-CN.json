@@ -1,5 +1,6 @@
 {
   "common": {
+    "close": "关闭",
     "siteName": "Dujiao-Next",
     "loading": "加载中...",
     "error": "错误",
@@ -48,7 +49,7 @@
   "nav": {
     "home": "首页",
     "products": "商品中心",
-    "blog": "博客",
+    "blog": "教程",
     "notice": "公告",
     "about": "关于"
   },
@@ -103,7 +104,8 @@
     "rights": "保留所有权利",
     "terms": "服务条款",
     "privacy": "隐私政策",
-    "email": "邮箱",
+    "email": "Email",
+    "x": "X",
     "supportUrl": "在线客服"
   },
   "notFoundPage": {
@@ -143,6 +145,8 @@
     }
   },
   "products": {
+    "browseCategories": "全部分类",
+    "toggleCategory": "展开或收起{name}",
     "subtitle": "浏览我们的精选商品",
     "priceAria": "价格 {price}",
     "promotionPriceAria": "促销价 {price}",
@@ -1694,6 +1698,10 @@
     "authClear": "清除已保存信息"
   },
   "productDetail": {
+    "cardMotion": {
+      "pause": "暂停卡片动画",
+      "resume": "继续卡片动画"
+    },
     "description": "商品描述",
     "details": "详细信息",
     "quantity": "购买数量",

@@ -40,7 +40,11 @@ type updateRequest struct {
 
 // Get 获取设置。
 func (h *AdminHandler) Get(c *gin.Context) {
-	key := c.DefaultQuery("key", constants.SettingKeySiteConfig)
+	key := strings.TrimSpace(c.DefaultQuery("key", constants.SettingKeySiteConfig))
+	if key == constants.SettingKeyDatabaseBackupConfig {
+		ginutil.RespondError(c, response.CodeBadRequest, "error.backup_config_private", nil)
+		return
+	}
 
 	value, err := h.settings.GetByKey(key)
 	if err != nil {
@@ -55,15 +59,18 @@ func (h *AdminHandler) Get(c *gin.Context) {
 	response.Success(c, value)
 }
 
-// settingFieldErrorKeys 复用分销站同名字段的文案，两边校验规则一致。
+// settingFieldErrorKeys 映射站点配置字段的校验文案，复用已有客服联系方式文案。
 var settingFieldErrorKeys = map[string]string{
 	"contact_telegram": "error.reseller_support_telegram_invalid",
 	"contact_whatsapp": "error.reseller_support_whatsapp_invalid",
+	"contact_email":    "error.reseller_support_email_invalid",
+	"contact_x":        "error.site_contact_x_invalid",
 }
 
 // dedicatedSettingEndpoints 有专用接口的设置：专用接口负责校验、归一化与运行时生效（如 SMTP、登录方式），
 // 走通用接口会跳过这些步骤，导致配置不生效或写入未校验的值。
 var dedicatedSettingEndpoints = map[string]string{
+	constants.SettingKeyDatabaseBackupConfig:     "/admin/backups/config",
 	constants.SettingKeySMTPConfig:               "/admin/settings/smtp",
 	constants.SettingKeyCaptchaConfig:            "/admin/settings/captcha",
 	constants.SettingKeyTelegramAuthConfig:       "/admin/settings/telegram-auth",

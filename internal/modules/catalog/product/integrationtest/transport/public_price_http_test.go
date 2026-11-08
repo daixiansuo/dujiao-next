@@ -6,8 +6,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
+
+	catalogproductbootstrap "github.com/dujiao-next/internal/bootstrap/catalogproduct"
+	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
+	categorygormstore "github.com/dujiao-next/internal/modules/catalog/category/infrastructure/gormstore"
+	productapplication "github.com/dujiao-next/internal/modules/catalog/product/application"
+	productgormstore "github.com/dujiao-next/internal/modules/catalog/product/store/gormstore"
+	"github.com/dujiao-next/internal/shared/jsonmap"
 
 	promotiondomain "github.com/dujiao-next/internal/modules/promotion/domain"
 
@@ -122,5 +130,104 @@ func TestPublicProductHTTPPromotionUsesDisplayPrice(t *testing.T) {
 	}
 	if !envelope.Data.PromotionPriceAmount.Decimal.Equal(expectedPromotion) {
 		t.Fatalf("expected promotion display price %s, got %s", expectedPromotion, envelope.Data.PromotionPriceAmount.String())
+	}
+}
+
+func TestPublicProductListUsesStorefrontOrderWithRealQueries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:storefront_http_%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&categorydomain.Category{}, &productdomain.Product{}, &productdomain.ProductSKU{}); err != nil {
+		t.Fatal(err)
+	}
+	parent := categorydomain.Category{Slug: "parent", NameJSON: jsonmap.JSON{"zh-CN": "parent"}, IsActive: true}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatal(err)
+	}
+	categories := []categorydomain.Category{
+		{Slug: "child", ParentID: parent.ID, NameJSON: jsonmap.JSON{"zh-CN": "child"}, IsActive: true},
+		{Slug: "other", NameJSON: jsonmap.JSON{"zh-CN": "other"}, IsActive: true},
+		{Slug: "inactive", NameJSON: jsonmap.JSON{"zh-CN": "inactive"}, IsActive: true},
+	}
+	if err := db.Create(&categories).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&categories[2]).Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	products := []productdomain.Product{
+		{Slug: "expensive", CategoryID: parent.ID, PriceAmount: money.FromDecimal(decimal.NewFromInt(20)), IsActive: true},
+		{Slug: "cheap", CategoryID: categories[0].ID, PriceAmount: money.FromDecimal(decimal.NewFromInt(5)), IsActive: true,
+			SKUs: []productdomain.ProductSKU{{SKUCode: "MATCH-SKU", PriceAmount: money.FromDecimal(decimal.NewFromInt(5)), IsActive: true}}},
+		{Slug: "middle", CategoryID: categories[1].ID, PriceAmount: money.FromDecimal(decimal.NewFromInt(10)), IsActive: true},
+		{Slug: "pinned", CategoryID: parent.ID, PriceAmount: money.FromDecimal(decimal.NewFromInt(99)), SortOrder: 100, IsActive: true},
+		{Slug: "multi", CategoryID: categories[0].ID, PriceAmount: money.FromDecimal(decimal.NewFromInt(1)), IsActive: true,
+			SKUs: []productdomain.ProductSKU{
+				{SKUCode: "FIRST", PriceAmount: money.FromDecimal(decimal.NewFromInt(30)), SortOrder: 100, IsActive: true},
+				{SKUCode: "MIN", PriceAmount: money.FromDecimal(decimal.NewFromInt(1)), SortOrder: 10, IsActive: true},
+			}},
+		{Slug: "inactive-product", CategoryID: parent.ID, IsActive: false},
+		{Slug: "deleted-product", CategoryID: parent.ID, IsActive: true, DeletedAt: &created},
+		{Slug: "inactive-category-product", CategoryID: categories[2].ID, IsActive: true},
+	}
+	for i := range products {
+		products[i].TitleJSON = jsonmap.JSON{"zh-CN": products[i].Slug}
+		products[i].CreatedAt = created.Add(time.Duration(i) * time.Minute)
+	}
+	if err := db.Create(&products).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := productapplication.NewService(productapplication.Options{
+		Products: productgormstore.NewProductStore(db), Categories: categorygormstore.NewCategoryStore(db),
+	})
+	handler := catalogproductbootstrap.NewPublicHTTP(catalogproductbootstrap.PublicHTTPDependencies{Products: service, RelatedPosts: emptyRelatedPostReader{}})
+	router := gin.New()
+	producthttp.RegisterPublicRoutes(router, handler)
+	for _, test := range []struct {
+		query string
+		want  []string
+		total int64
+	}{
+		{"?page=1&page_size=20", []string{"pinned", "cheap", "middle", "expensive", "multi"}, 5},
+		{fmt.Sprintf("?category_id=%d", parent.ID), []string{"pinned", "cheap", "expensive", "multi"}, 4},
+		{fmt.Sprintf("?category_id=%d", categories[0].ID), []string{"cheap", "multi"}, 2},
+		{"?page=2&page_size=2", []string{"middle", "expensive"}, 5},
+		{"?search=MATCH-SKU", []string{"cheap"}, 1},
+		{"?search=not-found", []string{}, 0},
+	} {
+		t.Run(test.query, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/products"+test.query, nil))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+			}
+			var envelope struct {
+				Data       []productpresenter.Product `json:"data"`
+				Pagination struct {
+					Total int64 `json:"total"`
+				} `json:"pagination"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(envelope.Data))
+			for _, product := range envelope.Data {
+				got = append(got, product.Slug)
+				if product.Slug == "multi" && product.PriceAmount.String() != "30.00" {
+					t.Fatalf("multi SKU display price want 30.00 got %s", product.PriceAmount.String())
+				}
+			}
+			if !reflect.DeepEqual(got, test.want) || envelope.Pagination.Total != test.total {
+				t.Fatalf("want %v total=%d got %v total=%d body=%s", test.want, test.total, got, envelope.Pagination.Total, recorder.Body.String())
+			}
+		})
 	}
 }

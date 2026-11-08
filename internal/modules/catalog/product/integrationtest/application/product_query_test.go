@@ -66,6 +66,76 @@ func TestProductServiceListPublicIncludesChildProductsForParentCategory(t *testi
 	}
 }
 
+func TestProductCategoryTreeFilteringBeforePagination(t *testing.T) {
+	svc, db := newProductServiceForTest(t)
+	root := categorydomain.Category{Slug: "tree-root", NameJSON: jsonmap.JSON{"zh-CN": "root"}, IsActive: true}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	second := categorydomain.Category{Slug: "tree-second", NameJSON: jsonmap.JSON{"zh-CN": "second"}, ParentID: root.ID, IsActive: true}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaves := []categorydomain.Category{
+		{Slug: "tree-third-a", ParentID: second.ID, IsActive: true},
+		{Slug: "tree-third-b", ParentID: second.ID, IsActive: true},
+		{Slug: "tree-third-inactive", ParentID: second.ID, IsActive: true},
+		{Slug: "tree-other", IsActive: true},
+	}
+	for i := range leaves {
+		leaves[i].NameJSON = jsonmap.JSON{"zh-CN": leaves[i].Slug}
+	}
+	if err := db.Create(&leaves).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&leaves[2]).Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i, categoryID := range []uint{root.ID, second.ID, leaves[0].ID, leaves[1].ID, leaves[2].ID, leaves[3].ID} {
+		product := productdomain.Product{
+			CategoryID: categoryID, Slug: "tree-product-" + strconv.Itoa(i),
+			TitleJSON: jsonmap.JSON{"zh-CN": "tree"}, IsActive: true, SortOrder: 60 - i,
+			PriceAmount: money.FromDecimal(decimal.NewFromInt(10)),
+		}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name       string
+		categoryID uint
+		page       int
+		wantTotal  int64
+		wantSlugs  []string
+	}{
+		{"root first page retains legacy products", root.ID, 1, 4, []string{"tree-product-0", "tree-product-1"}},
+		{"root second page includes third-level products", root.ID, 2, 4, []string{"tree-product-2", "tree-product-3"}},
+		{"second level includes grandchildren", second.ID, 1, 3, []string{"tree-product-1", "tree-product-2"}},
+		{"third level is exact", leaves[0].ID, 1, 1, []string{"tree-product-2"}},
+		{"inactive selected category has no public products", leaves[2].ID, 1, 0, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, total, err := svc.Read.ListPublic(strconv.FormatUint(uint64(tc.categoryID), 10), "", tc.page, 2)
+			if err != nil || total != tc.wantTotal || len(rows) != len(tc.wantSlugs) {
+				t.Fatalf("rows=%v total=%d err=%v", rows, total, err)
+			}
+			for i, slug := range tc.wantSlugs {
+				if rows[i].Slug != slug {
+					t.Fatalf("row %d slug=%s want=%s", i, rows[i].Slug, slug)
+				}
+			}
+		})
+	}
+	rows, total, err := svc.Read.ListAdmin(strconv.FormatUint(uint64(root.ID), 10), "", "", "", nil, nil, 0, 3, 2)
+	if err != nil || total != 5 || len(rows) != 1 || rows[0].Slug != "tree-product-4" {
+		t.Fatalf("admin must include inactive descendant categories before pagination: rows=%v total=%d err=%v", rows, total, err)
+	}
+	rows, total, err = svc.Read.ListPublicExact(strconv.FormatUint(uint64(root.ID), 10), 1, 20)
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].Slug != "tree-product-0" {
+		t.Fatalf("exact query must retain direct-only contract: rows=%v total=%d err=%v", rows, total, err)
+	}
+}
+
 func TestProductServiceListPublicIncludesThreeLevelsAndStopsAtInactiveBranch(t *testing.T) {
 	svc, db := newProductServiceForTest(t)
 	root := categorydomain.Category{Slug: "three-root", NameJSON: jsonmap.JSON{"zh-CN": "Root"}}

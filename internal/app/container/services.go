@@ -4,6 +4,7 @@ package container
 func (c *Container) initServices() {
 	c.initPolicyAndSettingServices()
 	c.loadRuntimeSettings()
+	c.initBackupService()
 	c.initIdentityAndCatalogServices()
 	c.initApplicationServices()
 	c.initIntegrationServices()

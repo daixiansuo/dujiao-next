@@ -159,10 +159,14 @@ func TestProductServiceListPublicForTenantExcludesResellerHiddenProductsBeforePa
 		t.Fatalf("create profile failed: %v", err)
 	}
 
-	visible, _ := seedResellerPublicProduct(t, db, category.ID, "visible", 1)
+	visible, visibleSKUs := seedResellerPublicProduct(t, db, category.ID, "visible", 1)
 	productHidden, _ := seedResellerPublicProduct(t, db, category.ID, "product-hidden", 1)
 	allSKUHidden, allHiddenSKUs := seedResellerPublicProduct(t, db, category.ID, "all-sku-hidden", 2)
 	partialSKUHidden, partialHiddenSKUs := seedResellerPublicProduct(t, db, category.ID, "partial-sku-hidden", 2)
+	// 较早创建的商品使用更低的基础展示价，验证价格优先于创建时间。
+	if err := db.Model(&visibleSKUs[0]).Update("price_amount", money.FromDecimal(decimal.NewFromInt(80))).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	createResellerPublicSetting(t, db, resellerdomain.ProductSetting{ResellerID: profile.ID, ProductID: productHidden.ID, SKUID: 0, IsListed: false, PricingMode: resellerdomain.PricingModeInherit})
 	for _, sku := range allHiddenSKUs {
@@ -171,19 +175,26 @@ func TestProductServiceListPublicForTenantExcludesResellerHiddenProductsBeforePa
 	createResellerPublicSetting(t, db, resellerdomain.ProductSetting{ResellerID: profile.ID, ProductID: partialSKUHidden.ID, SKUID: partialHiddenSKUs[0].ID, IsListed: false, PricingMode: resellerdomain.PricingModeInherit})
 
 	tenant := reseller.ResellerTenantContext("shop.example.test", profile.ID, owner.ID, "shop.example.test")
-	rows, total, err := svc.Read.ListPublicForTenant(tenant, resellerRepo, "", "", 1, 20)
-	if err != nil {
-		t.Fatalf("ListPublicForTenant failed: %v", err)
-	}
-	if total != 2 {
-		t.Fatalf("expected total=2 after excluding hidden products before pagination, got %d", total)
-	}
-	got := map[uint]bool{}
-	for _, product := range rows {
-		got[product.ID] = true
-	}
-	if !got[visible.ID] || !got[partialSKUHidden.ID] || got[productHidden.ID] || got[allSKUHidden.ID] {
-		t.Fatalf("unexpected products after reseller filtering: %+v", got)
+	want := []uint{visible.ID, partialSKUHidden.ID}
+	for _, pageSize := range []int{1, 20} {
+		var got []uint
+		for page := 1; page <= (len(want)+pageSize-1)/pageSize+1; page++ {
+			rows, total, err := svc.Read.ListPublicForTenant(tenant, resellerRepo, fmt.Sprint(category.ID), "", page, pageSize)
+			if err != nil || total != int64(len(want)) {
+				t.Fatalf("page=%d size=%d total=%d err=%v", page, pageSize, total, err)
+			}
+			for _, product := range rows {
+				got = append(got, product.ID)
+			}
+		}
+		if len(got) != len(want) {
+			t.Fatalf("page size %d: want %v, got %v", pageSize, want, got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("page size %d: want %v, got %v", pageSize, want, got)
+			}
+		}
 	}
 }
 

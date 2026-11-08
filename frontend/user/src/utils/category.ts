@@ -7,7 +7,7 @@ export interface PublicCategory {
 }
 
 export interface CategoryGroup extends PublicCategory {
-  children: PublicCategory[]
+  children: CategoryGroup[]
 }
 
 const normalizeCategoryId = (value: unknown) => {
@@ -37,33 +37,51 @@ export const createCategoryMap = (categories: PublicCategory[]) => {
   return categoryMap
 }
 
-export const buildCategoryGroups = (categories: PublicCategory[]) => {
+export const buildCategoryGroups = (categories: PublicCategory[]): CategoryGroup[] => {
   const categoryMap = createCategoryMap(categories)
-  const childrenByParent = new Map<number, PublicCategory[]>()
-  const rootCategories: PublicCategory[] = []
+  const nodes = new Map<number, CategoryGroup>()
+  for (const category of categoryMap.values()) {
+    nodes.set(category.id, { ...category, children: [] })
+  }
 
-  categories.forEach((rawCategory) => {
-    const category = categoryMap.get(normalizeCategoryId(rawCategory.id))
-    if (!category) return
-
-    const parentId = normalizeCategoryParentId(category.parent_id)
-    const parent = parentId > 0 ? categoryMap.get(parentId) : undefined
-
-    if (parentId <= 0 || !parent || parent.id === category.id) {
-      rootCategories.push(category)
-      return
+  const roots: CategoryGroup[] = []
+  for (const category of nodes.values()) {
+    const parent = nodes.get(normalizeCategoryParentId(category.parent_id))
+    if (!parent || parent.id === category.id) {
+      roots.push(category)
+    } else {
+      parent.children.push(category)
     }
-
-    const siblings = childrenByParent.get(parent.id) || []
-    siblings.push(category)
-    childrenByParent.set(parent.id, siblings)
-  })
-
-  return rootCategories.map((category) => ({
-    ...category,
-    children: childrenByParent.get(category.id) || [],
-  }))
+  }
+  return roots
 }
+
+export const flattenCategoryGroups = (groups: CategoryGroup[]): CategoryGroup[] => {
+  return groups.flatMap((group) => [group, ...flattenCategoryGroups(group.children)])
+}
+
+/** Ancestors ordered from the root to the immediate parent. */
+export const getCategoryAncestors = (
+  category: PublicCategory | undefined,
+  categoryMap: Map<number, PublicCategory>,
+): PublicCategory[] => {
+  const ancestors: PublicCategory[] = []
+  const visited = new Set<number>(category ? [category.id] : [])
+  let parentId = normalizeCategoryParentId(category?.parent_id)
+  while (parentId > 0 && !visited.has(parentId)) {
+    const parent = categoryMap.get(parentId)
+    if (!parent) break
+    visited.add(parentId)
+    ancestors.unshift(parent)
+    parentId = normalizeCategoryParentId(parent.parent_id)
+  }
+  return ancestors
+}
+
+export const getRootCategory = (
+  category: PublicCategory,
+  categoryMap: Map<number, PublicCategory>,
+): PublicCategory => getCategoryAncestors(category, categoryMap)[0] || category
 
 export const buildCategoryPath = (
   category: PublicCategory | undefined,
@@ -71,17 +89,8 @@ export const buildCategoryPath = (
   getLabel: (value: unknown) => string,
 ) => {
   if (!category) return ''
-
-  const selfLabel = getLabel(category.name)
-  const parentId = normalizeCategoryParentId(category.parent_id)
-  if (parentId <= 0) return selfLabel
-
-  const parent = categoryMap.get(parentId)
-  if (!parent || parent.id === category.id) return selfLabel
-
-  const parentLabel = getLabel(parent.name)
-  if (!parentLabel) return selfLabel
-  if (!selfLabel) return parentLabel
-
-  return `${parentLabel} / ${selfLabel}`
+  return [...getCategoryAncestors(category, categoryMap), category]
+    .map((item) => getLabel(item.name))
+    .filter(Boolean)
+    .join(' / ')
 }

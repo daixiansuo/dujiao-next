@@ -145,6 +145,67 @@ func setupAdminHandlerTest(t *testing.T, upstreamHandler http.HandlerFunc) (*map
 	return h, db, conn.ID, server.Close
 }
 
+func TestGetMappingsIncludesAllCategoryLevelsBeforePagination(t *testing.T) {
+	h, db, connID, cleanup := setupAdminHandlerTest(t, http.NotFound)
+	defer cleanup()
+	root := categorydomain.Category{Slug: "root", NameJSON: jsonmap.JSON{"zh-CN": "一级"}}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	child := categorydomain.Category{Slug: "child", ParentID: root.ID, NameJSON: jsonmap.JSON{"zh-CN": "二级"}}
+	if err := db.Create(&child).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaf := categorydomain.Category{Slug: "leaf", ParentID: child.ID, NameJSON: jsonmap.JSON{"zh-CN": "三级"}}
+	if err := db.Create(&leaf).Error; err != nil {
+		t.Fatal(err)
+	}
+	other := categorydomain.Category{Slug: "other", NameJSON: jsonmap.JSON{"zh-CN": "其他"}}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i, categoryID := range []uint{root.ID, child.ID, leaf.ID, leaf.ID, other.ID} {
+		product := productdomain.Product{CategoryID: categoryID, Slug: fmt.Sprintf("mapped-%d", i), TitleJSON: jsonmap.JSON{"zh-CN": "测试"}}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatal(err)
+		}
+		mapping := mappingdomain.Mapping{ConnectionID: connID, LocalProductID: product.ID, UpstreamProductID: uint(100 + i)}
+		if err := db.Create(&mapping).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		categoryID     uint
+		page, wantRows int
+		wantTotal      int64
+	}{
+		{root.ID, 1, 2, 4}, {root.ID, 2, 2, 4}, {child.ID, 1, 2, 3}, {child.ID, 2, 1, 3}, {leaf.ID, 1, 2, 2},
+	} {
+		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/admin/product-mappings?category_id=%d&page=%d&page_size=2", tc.categoryID, tc.page), nil)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = request
+		h.GetProductMappings(c)
+		var payload struct {
+			Data       []mappingdomain.Mapping `json:"data"`
+			Pagination struct {
+				Total int64 `json:"total"`
+			} `json:"pagination"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != http.StatusOK || len(payload.Data) != tc.wantRows || payload.Pagination.Total != tc.wantTotal {
+			t.Fatalf("category %d page %d: status=%d rows=%d total=%d, body=%s", tc.categoryID, tc.page, w.Code, len(payload.Data), payload.Pagination.Total, w.Body.String())
+		}
+		for _, mapping := range payload.Data {
+			if mapping.Product == nil || mapping.Product.CategoryID == other.ID {
+				t.Fatalf("unrelated product in category result: %+v", mapping)
+			}
+		}
+	}
+}
+
 func TestBatchImportUpstreamProductsAutoCreatesCategory(t *testing.T) {
 	h, db, connID, cleanup := setupAdminHandlerTest(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -153,7 +214,9 @@ func TestBatchImportUpstreamProductsAutoCreatesCategory(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok": true,
 				"categories": []upstream.UpstreamCategory{
-					{ID: 9, Slug: "upstream-streaming", Name: jsonmap.JSON{"zh-CN": "流媒体"}},
+					{ID: 7, Slug: "upstream-accounts", Name: jsonmap.JSON{"zh-CN": "账号"}},
+					{ID: 8, ParentID: 7, Slug: "upstream-media", Name: jsonmap.JSON{"zh-CN": "媒体"}},
+					{ID: 9, ParentID: 8, Slug: "upstream-streaming", Name: jsonmap.JSON{"zh-CN": "流媒体"}},
 				},
 			})
 		case "/api/v1/upstream/products/101":
@@ -209,6 +272,13 @@ func TestBatchImportUpstreamProductsAutoCreatesCategory(t *testing.T) {
 	}
 	if category.Slug != "upstream-streaming" {
 		t.Fatalf("expected auto-created category slug upstream-streaming, got %q", category.Slug)
+	}
+	var parent, root categorydomain.Category
+	if err := db.First(&parent, category.ParentID).Error; err != nil || parent.Slug != "upstream-media" {
+		t.Fatalf("third-level category parent not preserved: %+v, %v", parent, err)
+	}
+	if err := db.First(&root, parent.ParentID).Error; err != nil || root.Slug != "upstream-accounts" || root.ParentID != 0 {
+		t.Fatalf("third-level category root not preserved: %+v, %v", root, err)
 	}
 }
 

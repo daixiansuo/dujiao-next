@@ -35,8 +35,9 @@
               :class="{ 'border-[color:var(--gold-strong)] bg-warning/10': itemStockExceeded(item) }"
             >
               <div class="relative grid h-16 w-16 flex-none place-items-center overflow-hidden rounded-sm bg-secondary">
-                <img v-if="checkoutItemImage(item)" :src="checkoutItemImage(item)" :alt="getLocalizedText(item.title)" loading="lazy" class="absolute inset-0 h-full w-full object-cover" />
-                <Package v-else class="h-7 w-7 text-muted-foreground" />
+                <SmartImage :src="checkoutItemImage(item)" :alt="getLocalizedText(item.title)" img-class="absolute inset-0 h-full w-full object-contain">
+                  <template #fallback><Package class="h-7 w-7 text-muted-foreground" /></template>
+                </SmartImage>
               </div>
               <div class="min-w-0 flex-1">
                 <RouterLink :to="`/products/${item.slug}`" class="block font-bold hover:text-primary">{{ getLocalizedText(item.title) }}</RouterLink>
@@ -199,6 +200,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../../components/SmartImage.vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight, Package, ShoppingCart } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'

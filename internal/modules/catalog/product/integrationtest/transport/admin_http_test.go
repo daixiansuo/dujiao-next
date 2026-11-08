@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
 
 	"github.com/dujiao-next/internal/constants"
+	"github.com/dujiao-next/internal/i18n"
 	cardsecretgormstore "github.com/dujiao-next/internal/modules/cardsecret/infrastructure/gormstore"
 	cartdomain "github.com/dujiao-next/internal/modules/cart/domain"
 	cartgormstore "github.com/dujiao-next/internal/modules/cart/infrastructure/gormstore"
@@ -36,6 +38,7 @@ import (
 	producthttp "github.com/dujiao-next/internal/modules/catalog/product/transport/http"
 	memberlevelgormstore "github.com/dujiao-next/internal/modules/memberlevel/infrastructure/gormstore"
 	"github.com/dujiao-next/internal/shared/jsonmap"
+	"github.com/dujiao-next/internal/shared/jsonslice"
 	"github.com/dujiao-next/internal/shared/money"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -503,5 +506,300 @@ func TestAdminProductListFiltersByActiveState(t *testing.T) {
 	got = listSlugs("is_active=0&search=" + url.QueryEscape("绝不匹配的关键词"))
 	if len(got) != 0 {
 		t.Fatalf("is_active=0 + non-matching search should be empty, got %+v", got)
+	}
+}
+
+func setupBatchProductImagesTest(t *testing.T) (*gin.Engine, *gorm.DB) {
+	t.Helper()
+	h, db := setupAdminProductHandlerTest(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sqlite connection failed: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close sqlite failed: %v", err)
+		}
+	})
+	router := gin.New()
+	producthttp.RegisterAdminRoutes(router.Group("/api/v1/admin"), h)
+	return router, db
+}
+
+type batchProductImagesResponse struct {
+	StatusCode int    `json:"status_code"`
+	Msg        string `json:"msg"`
+	Data       struct {
+		Total        int `json:"total"`
+		SuccessCount int `json:"success_count"`
+		FailedItems  []struct {
+			ID        uint   `json:"id"`
+			ErrorCode string `json:"error_code"`
+			Message   string `json:"message"`
+		} `json:"failed_items"`
+	} `json:"data"`
+}
+
+func requestBatchProductImages(t *testing.T, router *gin.Engine, body, locale string) batchProductImagesResponse {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/products/batch-images", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Language", locale)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP status 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp batchProductImagesResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode batch images response failed: %v body=%s", err, w.Body.String())
+	}
+	return resp
+}
+
+func loadBatchImagesProduct(t *testing.T, db *gorm.DB, id uint) productdomain.Product {
+	t.Helper()
+	var product productdomain.Product
+	if err := db.Preload("SKUs").First(&product, id).Error; err != nil {
+		t.Fatalf("reload product %d failed: %v", id, err)
+	}
+	return product
+}
+
+func TestBatchUpdateProductImagesPersistsOnlyImages(t *testing.T) {
+	router, db := setupBatchProductImagesTest(t)
+	products := make([]productdomain.Product, 3)
+	for i := range products {
+		products[i] = productdomain.Product{
+			CategoryID:           7,
+			Slug:                 fmt.Sprintf("batch-images-preserve-%d", i),
+			TitleJSON:            jsonmap.JSON{"zh-CN": "商品标题", "en-US": "Product title"},
+			DescriptionJSON:      jsonmap.JSON{"zh-CN": "商品描述"},
+			ContentJSON:          jsonmap.JSON{"en-US": "Product content"},
+			InstructionsJSON:     jsonmap.JSON{"en-US": "Usage instructions"},
+			PriceAmount:          money.FromDecimal(decimal.NewFromInt(29)),
+			CostPriceAmount:      money.FromDecimal(decimal.NewFromInt(11)),
+			WholesalePrices:      productdomain.WholesalePriceTiers{{MinQuantity: 3, UnitPrice: money.FromDecimal(decimal.NewFromInt(25))}},
+			Images:               jsonslice.Strings{"/uploads/old-cover.png", "/uploads/old-detail.png"},
+			Tags:                 jsonslice.Strings{"featured", "original"},
+			PurchaseType:         "member",
+			MinPurchaseQuantity:  2,
+			MaxPurchaseQuantity:  10,
+			StockDisplayMode:     "hidden",
+			FulfillmentType:      constants.FulfillmentTypeManual,
+			ManualFormSchemaJSON: jsonmap.JSON{"version": float64(1)},
+			ManualStockTotal:     15,
+			ManualStockLocked:    2,
+			ManualStockSold:      4,
+			PaymentChannelIDs:    "[2,3]",
+			IsAffiliateEnabled:   true,
+			IsActive:             i == 0,
+			SortOrder:            42 + i,
+			SKUs: []productdomain.ProductSKU{{
+				SKUCode:          "original-sku",
+				PriceAmount:      money.FromDecimal(decimal.NewFromInt(29)),
+				ManualStockTotal: 15,
+				IsActive:         true,
+			}},
+		}
+		if err := db.Create(&products[i]).Error; err != nil {
+			t.Fatalf("seed product %d failed: %v", i, err)
+		}
+		products[i] = loadBatchImagesProduct(t, db, products[i].ID)
+	}
+
+	images := jsonslice.Strings{"/uploads/z-cover.png", "https://images.example.com/a-detail.png", "uploads/详情.webp", "/uploads/z-cover.png"}
+	payload, err := json.Marshal(map[string]interface{}{
+		"ids": []uint{products[1].ID, products[0].ID}, "images": images,
+		"category_id": 0, "is_active": false, "sort_order": 0,
+		"price_amount": "0", "slug": "overwritten", "tags": []string{"overwritten"},
+	})
+	if err != nil {
+		t.Fatalf("encode request failed: %v", err)
+	}
+	resp := requestBatchProductImages(t, router, string(payload), "en-US")
+	if resp.StatusCode != 0 || resp.Data.Total != 2 || resp.Data.SuccessCount != 2 || resp.Data.FailedItems == nil || len(resp.Data.FailedItems) != 0 {
+		t.Fatalf("unexpected batch result: %+v", resp)
+	}
+	for i, before := range products {
+		after := loadBatchImagesProduct(t, db, before.ID)
+		if i < 2 {
+			if !reflect.DeepEqual(after.Images, images) {
+				t.Fatalf("product %d image order/content want %v, got %v", before.ID, images, after.Images)
+			}
+			after.Images = before.Images
+			after.UpdatedAt = before.UpdatedAt
+		}
+		if !reflect.DeepEqual(after, before) {
+			t.Fatalf("product %d fields changed unexpectedly:\nbefore=%+v\nafter=%+v", before.ID, before, after)
+		}
+	}
+}
+
+func TestBatchUpdateProductImagesReturnsPartialFailures(t *testing.T) {
+	router, db := setupBatchProductImagesTest(t)
+	products := []productdomain.Product{
+		{Slug: "batch-images-first", Images: jsonslice.Strings{"/uploads/first.png"}},
+		{Slug: "batch-images-deleted", Images: jsonslice.Strings{"/uploads/deleted.png"}},
+		{Slug: "batch-images-blocked", Images: jsonslice.Strings{"/uploads/blocked.png"}},
+		{Slug: "batch-images-last", Images: jsonslice.Strings{"/uploads/last.png"}},
+	}
+	for i := range products {
+		products[i].TitleJSON = jsonmap.JSON{"en-US": products[i].Slug}
+	}
+	if err := db.Create(&products).Error; err != nil {
+		t.Fatalf("seed products failed: %v", err)
+	}
+	if err := db.Model(&productdomain.Product{}).Where("id = ?", products[1].ID).Update("deleted_at", time.Now()).Error; err != nil {
+		t.Fatalf("soft delete product failed: %v", err)
+	}
+	trigger := fmt.Sprintf(`CREATE TRIGGER reject_batch_images BEFORE UPDATE OF images ON products
+		WHEN NEW.id = %d BEGIN SELECT RAISE(FAIL, 'forced image update failure'); END`, products[2].ID)
+	if err := db.Exec(trigger).Error; err != nil {
+		t.Fatalf("create update failure trigger failed: %v", err)
+	}
+	for i := range products {
+		products[i] = loadBatchImagesProduct(t, db, products[i].ID)
+	}
+	missingID := products[3].ID + 100
+	for _, tc := range []struct {
+		name         string
+		ids          []uint
+		successCount int
+	}{
+		{"partial failure", []uint{products[0].ID, missingID, products[1].ID, products[2].ID, products[3].ID}, 2},
+		{"all failed", []uint{missingID, products[1].ID, products[2].ID}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]interface{}{"ids": tc.ids, "images": []string{"/uploads/new.png"}})
+			if err != nil {
+				t.Fatalf("encode request failed: %v", err)
+			}
+			resp := requestBatchProductImages(t, router, string(payload), "en-US")
+			if resp.StatusCode != 0 || resp.Data.Total != len(tc.ids) || resp.Data.SuccessCount != tc.successCount || len(resp.Data.FailedItems) != 3 {
+				t.Fatalf("unexpected batch result: %+v", resp)
+			}
+			for i, expected := range []struct {
+				id   uint
+				code string
+			}{
+				{missingID, "product_not_found"},
+				{products[1].ID, "product_not_found"},
+				{products[2].ID, "product_update_failed"},
+			} {
+				failure := resp.Data.FailedItems[i]
+				if failure.ID != expected.id || failure.ErrorCode != expected.code || failure.Message != i18n.T("en-US", "error."+expected.code) {
+					t.Fatalf("unexpected failed item %d: %+v", i, failure)
+				}
+			}
+		})
+	}
+	for i, before := range products {
+		after := loadBatchImagesProduct(t, db, before.ID)
+		if i == 0 || i == 3 {
+			if !reflect.DeepEqual(after.Images, jsonslice.Strings{"/uploads/new.png"}) {
+				t.Fatalf("valid product %d was not updated: %v", after.ID, after.Images)
+			}
+			after.Images = before.Images
+			after.UpdatedAt = before.UpdatedAt
+		}
+		if !reflect.DeepEqual(after, before) {
+			t.Fatalf("product %d changed unexpectedly:\nbefore=%+v\nafter=%+v", before.ID, before, after)
+		}
+	}
+}
+
+func TestBatchUpdateProductImagesRejectsInvalidRequests(t *testing.T) {
+	router, db := setupBatchProductImagesTest(t)
+	product := productdomain.Product{
+		Slug: "batch-images-invalid", TitleJSON: jsonmap.JSON{"en-US": "Original product"},
+		Images: jsonslice.Strings{"/uploads/original.png"},
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("seed product failed: %v", err)
+	}
+	before := loadBatchImagesProduct(t, db, product.ID)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"empty body", ``},
+		{"malformed JSON", `{"ids":[`},
+		{"null body", `null`},
+		{"array body", `[]`},
+		{"missing ids", `{"images":["/uploads/new.png"]}`},
+		{"null ids", `{"ids":null,"images":["/uploads/new.png"]}`},
+		{"empty ids", `{"ids":[],"images":["/uploads/new.png"]}`},
+		{"zero id", `{"ids":[$id,0],"images":["/uploads/new.png"]}`},
+		{"negative id", `{"ids":[$id,-1],"images":["/uploads/new.png"]}`},
+		{"fractional id", `{"ids":[$id,1.5],"images":["/uploads/new.png"]}`},
+		{"string id", `{"ids":[$id,"1"],"images":["/uploads/new.png"]}`},
+		{"null id", `{"ids":[$id,null],"images":["/uploads/new.png"]}`},
+		{"overflow id", `{"ids":[$id,18446744073709551616],"images":["/uploads/new.png"]}`},
+		{"invalid ids type", `{"ids":"1","images":["/uploads/new.png"]}`},
+		{"missing images", `{"ids":[$id]}`},
+		{"null images", `{"ids":[$id],"images":null}`},
+		{"empty images", `{"ids":[$id],"images":[]}`},
+		{"empty path", `{"ids":[$id],"images":[""]}`},
+		{"blank path", `{"ids":[$id],"images":[" \t\n "]}`},
+		{"invalid later path", `{"ids":[$id],"images":["/uploads/new.png",""]}`},
+		{"blank later path", `{"ids":[$id],"images":["/uploads/new.png","  "]}`},
+		{"null path", `{"ids":[$id],"images":[null]}`},
+		{"number path", `{"ids":[$id],"images":[1]}`},
+		{"invalid images type", `{"ids":[$id],"images":"/uploads/new.png"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.ReplaceAll(tc.body, "$id", fmt.Sprint(product.ID))
+			resp := requestBatchProductImages(t, router, body, "en-US")
+			if resp.StatusCode != http.StatusBadRequest || resp.Msg == "" || strings.Contains(resp.Msg, "validation.") || strings.Contains(resp.Msg, "error.") {
+				t.Fatalf("expected localized bad request, got %+v", resp)
+			}
+			if after := loadBatchImagesProduct(t, db, product.ID); !reflect.DeepEqual(after, before) {
+				t.Fatalf("invalid request mutated product: %+v", after)
+			}
+		})
+	}
+	for _, locale := range []string{"zh-CN", "zh-TW", "en-US"} {
+		t.Run(locale, func(t *testing.T) {
+			body := fmt.Sprintf(`{"ids":[%d],"images":["  "]}`, product.ID)
+			resp := requestBatchProductImages(t, router, body, locale)
+			if resp.StatusCode != http.StatusBadRequest || resp.Msg != i18n.T(locale, "error.bad_request") {
+				t.Fatalf("unexpected localized error: %+v", resp)
+			}
+		})
+	}
+}
+
+func TestBatchUpdateProductImagesHandlesHundredProducts(t *testing.T) {
+	router, db := setupBatchProductImagesTest(t)
+	products := make([]productdomain.Product, 100)
+	for i := range products {
+		products[i] = productdomain.Product{
+			Slug:      fmt.Sprintf("batch-images-hundred-%03d", i),
+			TitleJSON: jsonmap.JSON{"en-US": fmt.Sprintf("Product %d", i)},
+			Images:    jsonslice.Strings{fmt.Sprintf("/uploads/old-%d.png", i)},
+		}
+	}
+	if err := db.Create(&products).Error; err != nil {
+		t.Fatalf("seed hundred products failed: %v", err)
+	}
+	ids := make([]uint, len(products))
+	for i := range products {
+		ids[i] = products[i].ID
+	}
+	images := jsonslice.Strings{"/uploads/cover.png", "/uploads/detail.png"}
+	payload, err := json.Marshal(map[string]interface{}{"ids": ids, "images": images})
+	if err != nil {
+		t.Fatalf("encode request failed: %v", err)
+	}
+	resp := requestBatchProductImages(t, router, string(payload), "en-US")
+	if resp.StatusCode != 0 || resp.Data.Total != 100 || resp.Data.SuccessCount != 100 || resp.Data.FailedItems == nil || len(resp.Data.FailedItems) != 0 {
+		t.Fatalf("unexpected hundred product batch result: %+v", resp)
+	}
+	for _, product := range products {
+		if after := loadBatchImagesProduct(t, db, product.ID); !reflect.DeepEqual(after.Images, images) {
+			t.Fatalf("product %d image order/content want %v, got %v", product.ID, images, after.Images)
+		}
 	}
 }

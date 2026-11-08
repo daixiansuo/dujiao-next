@@ -1,12 +1,16 @@
 package application
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
+	categoryapp "github.com/dujiao-next/internal/modules/catalog/category/application"
 	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
 
 	"github.com/dujiao-next/internal/shared/jsonmap"
+	"github.com/dujiao-next/internal/upstream"
 )
 
 // fakeCategoryRepo 以内存实现分类查找/复活端口，验证 findOrCreateLocalCategory 的调用编排。
@@ -17,7 +21,22 @@ type fakeCategoryRepo struct {
 	restored int
 }
 
-func (f *fakeCategoryRepo) GetByID(id string) (*categorydomain.Category, error) { return nil, nil }
+func (f *fakeCategoryRepo) GetByID(id string) (*categorydomain.Category, error) {
+	for _, category := range f.visible {
+		if strconv.FormatUint(uint64(category.ID), 10) == id {
+			return category, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeCategoryRepo) List() ([]categorydomain.Category, error) {
+	var categories []categorydomain.Category
+	for _, category := range f.visible {
+		categories = append(categories, *category)
+	}
+	return categories, nil
+}
 
 func (f *fakeCategoryRepo) CountChildren(categoryID string) (int64, error) { return 0, nil }
 
@@ -47,7 +66,7 @@ func TestFindOrCreateLocalCategoryRestoresSoftDeleted(t *testing.T) {
 		IsActive: false,
 	}
 	repo := &fakeCategoryRepo{
-		visible: map[string]*categorydomain.Category{},
+		visible: map[string]*categorydomain.Category{"parent": {ID: 3, Slug: "parent"}},
 		deleted: map[string]*categorydomain.Category{"softdel-streaming": softDeleted},
 	}
 	svc := &Service{categories: repo}
@@ -73,6 +92,18 @@ func TestFindOrCreateLocalCategoryRestoresSoftDeleted(t *testing.T) {
 	}
 	if repo.visible["softdel-streaming"] == nil {
 		t.Fatalf("expected category to be visible after restore")
+	}
+}
+
+func TestImportCategoryRejectsTooDeepOrCyclicUpstreamTreeBeforeCreating(t *testing.T) {
+	for _, categories := range []map[uint]upstream.UpstreamCategory{
+		{1: {ID: 1}, 2: {ID: 2, ParentID: 1}, 3: {ID: 3, ParentID: 2}, 4: {ID: 4, ParentID: 3}},
+		{4: {ID: 4, ParentID: 3}, 3: {ID: 3, ParentID: 4}},
+	} {
+		svc := &Service{}
+		if _, err := svc.findOrCreateCategoryFromUpstream(4, categories); !errors.Is(err, categoryapp.ErrParentInvalid) {
+			t.Fatalf("expected invalid category hierarchy before accessing local stores, got %v", err)
+		}
 	}
 }
 

@@ -435,6 +435,13 @@ const (
 	ConnectionProtocolDujiaoNext = "dujiao-next"
 )
 
+// 上游连接加价方式。
+const (
+	ConnectionPriceMarkupPercent     = "percent"
+	ConnectionPriceMarkupFixedAmount = "fixed_amount"
+	ConnectionPriceMarkupSegmented   = "segmented"
+)
+
 // API 凭证状态常量
 const (
 	ApiCredentialStatusPendingReview = "pending_review"
@@ -467,6 +474,7 @@ const (
 const (
 	SettingKeySiteConfig               = "site_config"
 	SettingKeyOrderConfig              = "order_config"
+	SettingKeyDatabaseBackupConfig     = "database_backup_config"
 	SettingKeySMTPConfig               = "smtp_config"
 	SettingKeyCaptchaConfig            = "captcha_config"
 	SettingKeyTelegramAuthConfig       = "telegram_auth_config"

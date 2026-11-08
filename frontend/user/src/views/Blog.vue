@@ -4,7 +4,6 @@
     <div class="container mx-auto px-4 relative z-10">
       <!-- Page Header -->
       <div class="mb-16 mt-12 text-center">
-        <h1 class="text-4xl md:text-6xl font-black mb-6 tracking-tight text-foreground">{{ t('nav.blog') }}</h1>
         <p
           class="text-muted-foreground max-w-2xl mx-auto text-lg leading-relaxed border-b pb-8">
           {{ t('blog.subtitle') }}

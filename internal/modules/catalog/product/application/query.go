@@ -16,6 +16,8 @@ import (
 
 // ProductRepository 是读取应用服务所需的最小商品持久化端口。
 type ProductRepository interface {
+	ListForStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
+	ListForResellerStorefront(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
 	List(filter productcontract.ListFilter) ([]productdomain.Product, int64, error)
 	GetBySlug(slug string, onlyActive bool) (*productdomain.Product, error)
 	GetAdminByID(id string) (*productdomain.Product, error)
@@ -81,31 +83,31 @@ func (s *Service) ListPublic(categoryID, search string, page, pageSize int) ([]p
 
 // ListPublicForTenant 获取当前租户上下文的公开商品列表。
 func (s *Service) ListPublicForTenant(tenant reseller.TenantContext, resellerRepo HiddenProductRepository, categoryID, search string, page, pageSize int) ([]productdomain.Product, int64, error) {
-	if !tenant.IsReseller() {
-		return s.ListPublic(categoryID, search, page, pageSize)
-	}
-	if tenant.ResellerID == nil || resellerRepo == nil {
+	if tenant.IsReseller() && (tenant.ResellerID == nil || resellerRepo == nil) {
 		return nil, 0, productcontract.ErrResellerProductNotListed
 	}
 	categoryIDs, err := expandPublicCategoryIDs(s.categories, categoryID)
 	if err != nil {
 		return nil, 0, err
 	}
+	filter := productcontract.ListFilter{
+		Page:         page,
+		PageSize:     pageSize,
+		CategoryID:   categoryID,
+		CategoryIDs:  categoryIDs,
+		Search:       search,
+		OnlyActive:   true,
+		WithCategory: true,
+	}
+	if !tenant.IsReseller() {
+		return s.products.ListForStorefront(filter)
+	}
 	hiddenIDs, err := resellerRepo.ListHiddenProductIDs(*tenant.ResellerID)
 	if err != nil {
 		return nil, 0, err
 	}
-	filter := productcontract.ListFilter{
-		Page:              page,
-		PageSize:          pageSize,
-		CategoryID:        categoryID,
-		CategoryIDs:       categoryIDs,
-		Search:            search,
-		OnlyActive:        true,
-		WithCategory:      true,
-		ExcludeProductIDs: hiddenIDs,
-	}
-	return s.products.List(filter)
+	filter.ExcludeProductIDs = hiddenIDs
+	return s.products.ListForResellerStorefront(filter)
 }
 
 // ListForUpstreamSync 上游同步专用：可选包含已下架商品，便于下游识别下架状态
@@ -172,10 +174,15 @@ func (s *Service) GetPublicBySlugForTenant(tenant reseller.TenantContext, resell
 // ListAdmin 获取后台商品列表
 // isActive 为三态上架筛选：nil=不限，true=仅已上架，false=仅已下架。
 func (s *Service) ListAdmin(categoryID, search, fulfillmentType, stockStatus string, hasWholesalePrices, isActive *bool, lowStockThreshold int, page, pageSize int) ([]productdomain.Product, int64, error) {
+	categoryIDs, err := expandCategoryIDs(s.categories, categoryID, false)
+	if err != nil {
+		return nil, 0, err
+	}
 	filter := productcontract.ListFilter{
 		Page:               page,
 		PageSize:           pageSize,
 		CategoryID:         categoryID,
+		CategoryIDs:        categoryIDs,
 		Search:             search,
 		FulfillmentType:    strings.TrimSpace(fulfillmentType),
 		StockStatus:        normalizeStockStatus(stockStatus),
@@ -213,6 +220,10 @@ func normalizeStockStatus(raw string) string {
 }
 
 func expandPublicCategoryIDs(categoryRepo CategoryRepository, categoryID string) ([]uint, error) {
+	return expandCategoryIDs(categoryRepo, categoryID, true)
+}
+
+func expandCategoryIDs(categoryRepo CategoryRepository, categoryID string, onlyActive bool) ([]uint, error) {
 	normalizedCategoryID := strings.TrimSpace(categoryID)
 	if normalizedCategoryID == "" {
 		return nil, nil
@@ -233,32 +244,23 @@ func expandPublicCategoryIDs(categoryRepo CategoryRepository, categoryID string)
 	if category == nil {
 		return []uint{uint(parsedCategoryID)}, nil
 	}
-	if !category.IsActive {
+	if onlyActive && !category.IsActive {
 		return []uint{}, nil
 	}
+
 	categories, err := categoryRepo.List()
 	if err != nil {
 		return nil, err
 	}
 
-	children := make(map[uint][]uint)
-	for _, item := range categories {
-		if item.IsActive {
-			children[item.ParentID] = append(children[item.ParentID], item.ID)
+	if onlyActive {
+		activeCategories := make([]categorydomain.Category, 0, len(categories))
+		for _, item := range categories {
+			if item.IsActive {
+				activeCategories = append(activeCategories, item)
+			}
 		}
+		categories = activeCategories
 	}
-	var categoryIDs []uint
-	pending := []uint{category.ID}
-	seen := make(map[uint]bool)
-	for len(pending) > 0 {
-		id := pending[0]
-		pending = pending[1:]
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		categoryIDs = append(categoryIDs, id)
-		pending = append(pending, children[id]...)
-	}
-	return categoryIDs, nil
+	return categorydomain.DescendantIDs(categories, category.ID), nil
 }

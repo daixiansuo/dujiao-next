@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/dujiao-next/internal/constants"
+	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
 	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 )
@@ -74,6 +75,13 @@ func (s *Service) GetByID(id uint) (*mappingdomain.Mapping, error) {
 
 // List 列表查询映射
 func (s *Service) List(filter mappingcontract.ListFilter) ([]mappingdomain.Mapping, int64, error) {
+	if filter.CategoryID > 0 && s.categories != nil {
+		categories, err := s.categories.List()
+		if err != nil {
+			return nil, 0, err
+		}
+		filter.CategoryIDs = categorydomain.DescendantIDs(categories, filter.CategoryID)
+	}
 	return s.mappings.List(filter)
 }
 
@@ -110,11 +118,14 @@ func (s *Service) Delete(id uint) error {
 		localProduct, err := s.products.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
 		if err == nil && localProduct != nil {
 			localProduct.IsMapped = false
+			fields := map[string]interface{}{"is_mapped": localProduct.IsMapped}
 			if localProduct.FulfillmentType == constants.FulfillmentTypeUpstream {
 				localProduct.FulfillmentType = constants.FulfillmentTypeManual
 				localProduct.IsActive = false // 下架，防止用户下单后无法交付
+				fields["fulfillment_type"] = localProduct.FulfillmentType
+				fields["is_active"] = localProduct.IsActive
 			}
-			_ = s.products.Update(localProduct)
+			_ = s.products.QuickUpdate(strconv.FormatUint(uint64(localProduct.ID), 10), fields)
 		}
 	}
 

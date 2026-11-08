@@ -9,6 +9,8 @@ import (
 // ListFilter 是商品映射列表筛选条件。
 type ListFilter struct {
 	ConnectionID   uint
+	CategoryID     uint
+	CategoryIDs    []uint
 	UpstreamStatus string
 	ProductStatus  string
 	Search         string
@@ -61,6 +63,7 @@ type SKURepository interface {
 // CategoryRepository 是映射上下文所需的分类端口。
 type CategoryRepository interface {
 	productdomain.CategoryAssignmentRepository
+	List() ([]categorydomain.Category, error)
 	GetBySlug(slug string) (*categorydomain.Category, error)
 	GetBySlugUnscoped(slug string) (*categorydomain.Category, error)
 	Restore(category *categorydomain.Category) error
@@ -75,6 +78,7 @@ type ImportTxProductRepository interface {
 // ImportTxSKURepository 是导入事务内的本地 SKU 写入端口。
 type ImportTxSKURepository interface {
 	Create(item *productdomain.ProductSKU) error
+	Update(item *productdomain.ProductSKU) error
 }
 
 // ImportTxMappingRepository 是导入事务内的映射写入端口。
@@ -85,6 +89,7 @@ type ImportTxMappingRepository interface {
 // ImportTxSKUMappingRepository 是导入事务内的 SKU 映射写入端口。
 type ImportTxSKUMappingRepository interface {
 	Create(mapping *mappingdomain.SKUMapping) error
+	Update(mapping *mappingdomain.SKUMapping) error
 }
 
 // ImportRepositories 是一次上游商品导入事务中绑定的全部窄端口。

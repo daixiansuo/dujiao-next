@@ -6,7 +6,9 @@ package integrationtest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +20,10 @@ import (
 	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 
+	categoryapp "github.com/dujiao-next/internal/modules/catalog/category/application"
 	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
+	categorygormstore "github.com/dujiao-next/internal/modules/catalog/category/infrastructure/gormstore"
+	productapp "github.com/dujiao-next/internal/modules/catalog/product/application"
 
 	"github.com/dujiao-next/internal/constants"
 	productgormstore "github.com/dujiao-next/internal/modules/catalog/product/store/gormstore"
@@ -33,6 +38,49 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestPostgresThirdLevelCategoriesAndParentPagination(t *testing.T) {
+	db := setupPostgresIntegrationDB(t)
+	categories := categorygormstore.NewCategoryStore(db)
+	categoryService := categoryapp.NewService(categories)
+	var parentID uint
+	var chain []*categorydomain.Category
+	for _, slug := range []string{"accounts", "facebook", "old-accounts"} {
+		category, err := categoryService.Create(categoryapp.UpsertInput{ParentID: parentID, Slug: slug, NameJSON: map[string]interface{}{"zh-CN": slug}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chain = append(chain, category)
+		parentID = category.ID
+	}
+	if _, err := categoryService.Create(categoryapp.UpsertInput{ParentID: parentID, Slug: "fourth", NameJSON: map[string]interface{}{"zh-CN": "第四级"}}); !errors.Is(err, categoryapp.ErrParentInvalid) {
+		t.Fatalf("expected fourth category level rejected, got %v", err)
+	}
+	products := productgormstore.NewProductStore(db)
+	for i, category := range chain {
+		product := productdomain.Product{CategoryID: category.ID, Slug: category.Slug + "-product", TitleJSON: jsonmap.JSON{"zh-CN": category.Slug}, IsActive: true, SortOrder: i}
+		if err := products.Create(&product); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := productapp.NewService(productapp.Options{Products: products, Categories: categories})
+	for _, tc := range []struct {
+		categoryID uint
+		total      int64
+		page       int
+		slug       string
+	}{
+		{chain[0].ID, 3, 1, "old-accounts-product"},
+		{chain[0].ID, 3, 2, "facebook-product"},
+		{chain[1].ID, 2, 2, "facebook-product"},
+		{chain[2].ID, 1, 1, "old-accounts-product"},
+	} {
+		rows, total, err := service.ListPublic(fmt.Sprint(tc.categoryID), "", tc.page, 1)
+		if err != nil || total != tc.total || len(rows) != 1 || rows[0].Slug != tc.slug {
+			t.Fatalf("category=%d page=%d: rows=%v total=%d err=%v", tc.categoryID, tc.page, rows, total, err)
+		}
+	}
+}
 
 // setupPostgresIntegrationDB 初始化 PostgreSQL 集成测试数据库。
 func setupPostgresIntegrationDB(t *testing.T) *gorm.DB {
@@ -491,5 +539,76 @@ func TestPostgresDashboardQueries(t *testing.T) {
 	}
 	if strings.TrimSpace(paymentTrends[0].Day) == "" {
 		t.Fatalf("payment trend day should not be empty")
+	}
+}
+
+func TestPostgresProductStorefrontOrder(t *testing.T) {
+	db := setupPostgresIntegrationDB(t)
+	category := categorydomain.Category{Slug: "pg-storefront", NameJSON: jsonmap.JSON{"zh-CN": "排序"}, IsActive: true}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	amount := func(value string) money.Amount { return money.FromDecimal(decimal.RequireFromString(value)) }
+	fixtures := []struct {
+		slug   string
+		price  string
+		weight int
+		skus   []productdomain.ProductSKU
+	}{
+		{"pinned", "500", 100, nil},
+		{"multi", "1", 10, []productdomain.ProductSKU{
+			{SKUCode: "DISPLAY-FIRST", PriceAmount: amount("89.90"), SortOrder: 100, IsActive: true},
+			{SKUCode: "MIN", PriceAmount: amount("1"), SortOrder: 10, IsActive: true},
+			{SKUCode: "DISABLED", PriceAmount: amount("0.01"), SortOrder: 200, IsActive: true},
+			{SKUCode: "DELETED", PriceAmount: amount("0.01"), SortOrder: 300, IsActive: true, DeletedAt: &created},
+		}},
+		{"decimal", "9.99", 10, nil},
+		{"older-ten", "10", 10, nil},
+		{"newer-ten", "10", 10, nil},
+		{"cheap", "2", 10, nil},
+		{"fallback", "15", 10, []productdomain.ProductSKU{{SKUCode: "DISABLED", PriceAmount: amount("0.01"), IsActive: true}}},
+		{"hundred", "100", 10, nil},
+	}
+	for i, fixture := range fixtures {
+		product := productdomain.Product{
+			CategoryID: category.ID, Slug: fixture.slug, TitleJSON: jsonmap.JSON{"zh-CN": "排序 " + fixture.slug},
+			PriceAmount: amount(fixture.price), SortOrder: fixture.weight, IsActive: true,
+			CreatedAt: created.Add(time.Duration(i) * time.Minute), SKUs: fixture.skus,
+		}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Model(&productdomain.ProductSKU{}).Where("sku_code = ?", "DISABLED").Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := productgormstore.NewProductStore(db)
+	want := []string{"pinned", "cheap", "decimal", "newer-ten", "older-ten", "fallback", "multi", "hundred"}
+	for _, pageSize := range []int{3, 20} {
+		var got []string
+		for page := 1; ; page++ {
+			rows, total, err := repo.ListForStorefront(productcontract.ListFilter{OnlyActive: true, WithCategory: true, Page: page, PageSize: pageSize})
+			if err != nil || total != int64(len(want)) {
+				t.Fatalf("PostgreSQL page %d size %d: total=%d err=%v", page, pageSize, total, err)
+			}
+			for _, row := range rows {
+				got = append(got, row.Slug)
+			}
+			if len(rows) == 0 {
+				break
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("PostgreSQL page size %d: want %v got %v", pageSize, want, got)
+		}
+	}
+	rows, total, err := repo.ListForStorefront(productcontract.ListFilter{OnlyActive: true, Search: "DISPLAY-FIRST", Page: 1, PageSize: 20})
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].Slug != "multi" || len(rows[0].SKUs) != 2 || rows[0].SKUs[0].PriceAmount.String() != "89.90" {
+		t.Fatalf("PostgreSQL SKU search/display price mismatch: rows=%+v total=%d err=%v", rows, total, err)
+	}
+	rows, total, err = repo.List(productcontract.ListFilter{OnlyActive: true, Page: 1, PageSize: 20})
+	if err != nil || total != int64(len(want)) || len(rows) != len(want) || rows[1].Slug != "hundred" {
+		t.Fatalf("PostgreSQL original list must keep newest first after weight: rows=%+v total=%d err=%v", rows, total, err)
 	}
 }

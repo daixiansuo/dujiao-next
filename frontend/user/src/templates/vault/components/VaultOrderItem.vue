@@ -1,18 +1,12 @@
 <template>
   <div class="flex flex-wrap justify-between gap-3.5 border-b py-3.5 first:pt-0 last:border-b-0 last:pb-0 max-[640px]:flex-col">
-    <div class="flex min-w-0 flex-1 gap-3 max-[640px]:flex-none">
-      <div class="grid h-[60px] w-[60px] flex-none place-items-center overflow-hidden rounded-sm border bg-secondary">
-        <img
-          v-if="orderItemImage(item)"
-          :src="orderItemImage(item)"
-          :alt="getLocalizedText(item.title)"
-          loading="lazy"
-          decoding="async"
-          class="h-full w-full object-cover"
-        />
-        <ImageIcon v-else :stroke-width="1.5" class="h-[22px] w-[22px] text-muted-foreground" />
+    <div class="flex min-w-0 flex-1 flex-wrap items-start gap-3 max-[640px]:flex-none">
+      <div class="relative grid aspect-[8/5] w-24 flex-none place-items-center sm:w-32 overflow-hidden rounded-sm border bg-secondary">
+        <SmartImage :src="orderItemImage(item)" :alt="getLocalizedText(item.title)" img-class="absolute inset-0 h-full w-full object-contain">
+          <template #fallback><ImageIcon :stroke-width="1.5" class="h-[22px] w-[22px] text-muted-foreground" /></template>
+        </SmartImage>
       </div>
-      <div class="min-w-0">
+      <div class="min-w-0 flex-1 basis-[120px] break-words">
         <div class="font-bold">{{ getLocalizedText(item.title) }}</div>
         <div class="mt-0.5 text-[12.5px] text-muted-foreground">{{ t('orderDetail.quantityLabel') }}：{{ item.quantity }}</div>
         <div v-if="orderItemSkuText(item)" class="mt-0.5 text-[12.5px] text-muted-foreground">{{ t('orderDetail.itemSkuLabel') }}：{{ orderItemSkuText(item) }}</div>
@@ -28,7 +22,7 @@
         </div>
       </div>
     </div>
-    <div class="grid min-w-[180px] content-start gap-0.5 text-right text-[12.5px] text-muted-foreground max-[640px]:min-w-0 max-[640px]:pl-[72px] max-[640px]:text-left">
+    <div class="grid min-w-[180px] content-start gap-0.5 text-right text-[12.5px] text-muted-foreground max-[640px]:min-w-0 max-[640px]:text-left">
       <div>{{ t('orderDetail.unitPriceLabel') }}：{{ formatMoney(item.original_unit_price, currency) }}</div>
       <div>{{ t('orderDetail.totalPriceLabel') }}：{{ formatMoney(item.original_total_price, currency) }}</div>
       <div v-if="hasDiscountAmount(item.coupon_discount_amount)" class="text-destructive">{{ t('orderDetail.couponDiscountLabel') }}：{{ formatDiscountMoney(item.coupon_discount_amount, currency) }}</div>
@@ -42,6 +36,7 @@
 </template>
 
 <script setup lang="ts">
+import SmartImage from '../../../components/SmartImage.vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Image as ImageIcon } from 'lucide-vue-next'

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
+import { useSiteBrandStore } from '@/stores/siteBrand'
 import RichEditor from '@/components/RichEditor.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,8 +24,10 @@ import SettingsOrderEmailTemplateTab from './components/SettingsOrderEmailTempla
 import SettingsNavigationTab from './components/SettingsNavigationTab.vue'
 import SettingsHomeAnnouncementTab from './components/SettingsHomeAnnouncementTab.vue'
 import SettingsUpstreamSyncTab from './components/SettingsUpstreamSyncTab.vue'
+import SettingsBackupTab from './components/SettingsBackupTab.vue'
 
 const { t } = useI18n()
+const siteBrandStore = useSiteBrandStore()
 const loading = ref(false)
 const smtpTabRef = ref<InstanceType<typeof SettingsSMTPTab>>()
 const captchaTabRef = ref<InstanceType<typeof SettingsCaptchaTab>>()
@@ -32,6 +35,7 @@ const orderEmailTemplateTabRef = ref<InstanceType<typeof SettingsOrderEmailTempl
 const navigationTabRef = ref<InstanceType<typeof SettingsNavigationTab>>()
 const homeAnnouncementTabRef = ref<InstanceType<typeof SettingsHomeAnnouncementTab>>()
 const upstreamSyncTabRef = ref<InstanceType<typeof SettingsUpstreamSyncTab>>()
+const backupTabRef = ref<InstanceType<typeof SettingsBackupTab>>()
 const siteIconPickerRef = ref<InstanceType<typeof MediaPicker> | null>(null)
 const siteLogoPickerRef = ref<InstanceType<typeof MediaPicker> | null>(null)
 const supportedLanguages = ['zh-CN', 'zh-TW', 'en-US'] as const
@@ -86,6 +90,7 @@ const tabs = computed(() => [
   { label: t('admin.settings.tabs.google'), value: 'google' },
   { label: t('admin.settings.tabs.dashboard'), value: 'dashboard' },
   { label: t('admin.settings.tabs.upstreamSync'), value: 'upstream_sync' },
+  { label: t('admin.settings.tabs.backup'), value: 'backup' },
 ])
 
 const fallbackCurrencyOptions = [
@@ -193,6 +198,8 @@ const form = reactive({
   contact: {
     telegram: '',
     whatsapp: '',
+    email: '',
+    x: '',
   },
   seo: {
     title: createLocalizedField(),
@@ -625,6 +632,7 @@ const saveSiteSettings = async () => {
     },
   }
   await adminAPI.updateSettings(payload)
+  siteBrandStore.setBrand(form.brand)
   applySiteIcon(form.brand.site_icon)
 }
 
@@ -764,6 +772,10 @@ const saveDashboardSettings = async () => {
 }
 
 const saveSettings = async () => {
+  if (currentTab.value === 'backup') {
+    await backupTabRef.value?.save()
+    return
+  }
   if (currentTab.value === 'smtp') {
     await smtpTabRef.value?.save()
     return
@@ -833,9 +845,9 @@ onMounted(() => {
             {{ lang.name }}
           </button>
         </div>
-        <Button size="sm" class="w-full sm:w-auto" :disabled="loading || smtpTabRef?.submitting || smtpTabRef?.smtpTesting || captchaTabRef?.submitting || orderEmailTemplateTabRef?.submitting || navigationTabRef?.submitting || homeAnnouncementTabRef?.submitting || upstreamSyncTabRef?.submitting" @click="saveSettings">
-          <span v-if="loading" class="h-3 w-3 animate-spin rounded-full border-2 border-primary/30 border-t-primary"></span>
-          {{ loading ? t('admin.settings.actions.saving') : t('admin.settings.actions.save') }}
+        <Button size="sm" class="w-full sm:w-auto" :disabled="loading || smtpTabRef?.submitting || smtpTabRef?.smtpTesting || captchaTabRef?.submitting || orderEmailTemplateTabRef?.submitting || navigationTabRef?.submitting || homeAnnouncementTabRef?.submitting || upstreamSyncTabRef?.submitting || (currentTab === 'backup' && !backupTabRef?.canSave)" @click="saveSettings">
+          <span v-if="loading || (currentTab === 'backup' && backupTabRef?.submitting)" class="h-3 w-3 animate-spin rounded-full border-2 border-primary/30 border-t-primary"></span>
+          {{ loading || (currentTab === 'backup' && backupTabRef?.submitting) ? t('admin.settings.actions.saving') : t('admin.settings.actions.save') }}
         </Button>
       </div>
     </div>
@@ -1046,6 +1058,14 @@ onMounted(() => {
           <div class="space-y-2">
             <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.contact.whatsapp') }}</label>
             <Input v-model="form.contact.whatsapp" :placeholder="t('admin.settings.contact.whatsappPlaceholder')" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.contact.email') }}</label>
+            <Input v-model="form.contact.email" type="email" :placeholder="t('admin.settings.contact.emailPlaceholder')" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.contact.x') }}</label>
+            <Input v-model="form.contact.x" type="url" :placeholder="t('admin.settings.contact.xPlaceholder')" />
           </div>
         </div>
       </div>
@@ -1502,6 +1522,10 @@ onMounted(() => {
 
       <TabsContent value="upstream_sync" :forceMount="true" v-show="currentTab === 'upstream_sync'" class="mt-0">
         <SettingsUpstreamSyncTab ref="upstreamSyncTabRef" />
+      </TabsContent>
+
+      <TabsContent value="backup" :forceMount="true" v-show="currentTab === 'backup'" class="mt-0 min-w-0">
+        <SettingsBackupTab ref="backupTabRef" :active="currentTab === 'backup'" />
       </TabsContent>
 
       <TabsContent value="dashboard" :forceMount="true" v-show="currentTab === 'dashboard'" class="space-y-6 mt-0">

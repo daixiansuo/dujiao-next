@@ -40,6 +40,10 @@
             <Mail class="h-6 w-6 flex-none text-[#f59e0b]" />
             <span>{{ t('footer.email') }}</span>
           </a>
+          <a v-if="contactConfig?.x" :href="contactConfig.x" target="_blank" rel="noopener noreferrer" class="flex items-center justify-center gap-3 rounded-md border bg-secondary p-4 font-bold text-muted-foreground transition hover:border-hairline-strong hover:text-foreground">
+            <svg viewBox="0 0 24 24" fill="currentColor" class="h-6 w-6 flex-none" aria-hidden="true"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.64 7.584H.47l8.6-9.835L0 1.154h7.594l5.243 6.932 6.064-6.933zM17.61 20.644h2.039L6.486 3.24H4.298L17.61 20.644z" /></svg>
+            <span>{{ t('footer.x') }}</span>
+          </a>
           <a v-if="contactConfig?.support_url" :href="contactConfig.support_url" :target="contactConfig.support_url.startsWith('https://') ? '_blank' : undefined" rel="noopener noreferrer" class="flex items-center justify-center gap-3 rounded-md border bg-secondary p-4 font-bold text-muted-foreground transition hover:border-hairline-strong hover:text-foreground">
             <Headphones class="h-6 w-6 flex-none text-[#8b5cf6]" />
             <span>{{ t('footer.supportUrl') }}</span>

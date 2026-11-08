@@ -26,6 +26,7 @@ type memberLevelPriceCleaner interface {
 // ProductStore 是装配层需要的 Product 持久化与事务能力。
 type ProductStore interface {
 	productcontract.Repository
+	productapplication.ProductRepository
 	Transaction(fn func(tx *gorm.DB) error) error
 	BindTx(tx *gorm.DB) productcontract.Repository
 }

@@ -23,3 +23,79 @@ type Category struct {
 func (Category) TableName() string {
 	return "categories"
 }
+
+const MaxDepth = 3
+
+// DescendantIDs returns the category and its descendants, preserving sibling order.
+// Missing categories retain their ID so a query still matches no unrelated rows.
+func DescendantIDs(categories []Category, categoryID uint) []uint {
+	if categoryID == 0 {
+		return nil
+	}
+	children := make(map[uint][]uint, len(categories))
+	for _, category := range categories {
+		children[category.ParentID] = append(children[category.ParentID], category.ID)
+	}
+	ids := []uint{categoryID}
+	visited := map[uint]bool{categoryID: true}
+	for index := 0; index < len(ids); index++ {
+		for _, childID := range children[ids[index]] {
+			if !visited[childID] {
+				visited[childID] = true
+				ids = append(ids, childID)
+			}
+		}
+	}
+	return ids
+}
+
+// CanSetParent checks the depth of the whole moved branch. categoryID=0 creates a leaf.
+func CanSetParent(categories []Category, categoryID, parentID uint) bool {
+	parents := make(map[uint]uint, len(categories))
+	children := make(map[uint][]uint, len(categories))
+	for _, category := range categories {
+		parents[category.ID] = category.ParentID
+		children[category.ParentID] = append(children[category.ParentID], category.ID)
+	}
+
+	parentDepth := 0
+	visited := make(map[uint]bool)
+	for id := parentID; id != 0; {
+		if id == categoryID || visited[id] {
+			return false
+		}
+		next, exists := parents[id]
+		if !exists {
+			return false
+		}
+		visited[id] = true
+		parentDepth++
+		id = next
+	}
+	if parentDepth >= MaxDepth {
+		return false
+	}
+	if categoryID == 0 {
+		return true
+	}
+
+	branch := []uint{categoryID}
+	visited = map[uint]bool{categoryID: true}
+	for depth := 1; len(branch) > 0; depth++ {
+		if parentDepth+depth > MaxDepth {
+			return false
+		}
+		var next []uint
+		for _, id := range branch {
+			for _, childID := range children[id] {
+				if visited[childID] {
+					return false
+				}
+				visited[childID] = true
+				next = append(next, childID)
+			}
+		}
+		branch = next
+	}
+	return true
+}

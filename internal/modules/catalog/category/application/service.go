@@ -2,7 +2,6 @@ package categoryapp
 
 import (
 	"errors"
-	"strconv"
 
 	categorycontract "github.com/dujiao-next/internal/modules/catalog/category/contract"
 	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
@@ -140,27 +139,19 @@ func (service *Service) Delete(id string) error {
 }
 
 func (service *Service) validateParent(category *categorydomain.Category, parentID uint) error {
-	if parentID == 0 {
+	if category == nil && parentID == 0 {
 		return nil
 	}
-	if category != nil && category.ID == parentID {
-		return ErrParentInvalid
-	}
-	parent, err := service.repository.GetByID(strconv.FormatUint(uint64(parentID), 10))
+	categories, err := service.repository.List()
 	if err != nil {
 		return err
 	}
-	if parent == nil || parent.ParentID != 0 {
-		return ErrParentInvalid
+	var categoryID uint
+	if category != nil {
+		categoryID = category.ID
 	}
-	if category != nil && category.ParentID == 0 {
-		childCount, err := service.repository.CountChildren(strconv.FormatUint(uint64(category.ID), 10))
-		if err != nil {
-			return err
-		}
-		if childCount > 0 {
-			return ErrParentInvalid
-		}
+	if !categorydomain.CanSetParent(categories, categoryID, parentID) {
+		return ErrParentInvalid
 	}
 	return nil
 }

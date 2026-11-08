@@ -28,7 +28,7 @@ func BuildRunner(cfg *config.Config, mode string) (*Runner, error) {
 		engine := httpserver.SetupRouter(cfg, dependencies)
 		addr := cfg.Server.Host + ":" + cfg.Server.Port
 		httpService := NewHTTPService(addr, engine)
-		services = append(services, httpService)
+		services = append(services, httpService, &backupService{service: dependencies.BackupService})
 	}
 
 	// 初始化 Worker 服务
