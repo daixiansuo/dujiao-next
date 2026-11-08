@@ -57,30 +57,34 @@ func (h *Handler) GetCategories(c *gin.Context) {
 		}
 	}
 
-	// 构建可见分类列表：
-	// - 一级分类：有直接商品 或 有子分类 → 可见
-	// - 二级分类：只要父分类可见就一律返回（由客户端决定是否显示空分类）
-	visibleParentIDs := make(map[uint]struct{})
+	// 从可见根分类向下遍历，保留完整层级；停用父分类的下级和孤立分类不暴露。
+	children := make(map[uint][]uint)
+	visibleIDs := make(map[uint]bool, len(categories))
+	var pending []uint
 	for _, cat := range categories {
+		children[cat.ParentID] = append(children[cat.ParentID], cat.ID)
 		if cat.ParentID == 0 {
 			count := directCounts[cat.ID]
 			_, hasChild := hasChildren[cat.ID]
 			if count > 0 || hasChild {
-				visibleParentIDs[cat.ID] = struct{}{}
+				pending = append(pending, cat.ID)
 			}
 		}
+	}
+	for len(pending) > 0 {
+		id := pending[0]
+		pending = pending[1:]
+		if visibleIDs[id] {
+			continue
+		}
+		visibleIDs[id] = true
+		pending = append(pending, children[id]...)
 	}
 
 	var items []categoryItem
 	for _, cat := range categories {
-		if cat.ParentID == 0 {
-			if _, ok := visibleParentIDs[cat.ID]; !ok {
-				continue
-			}
-		} else {
-			if _, ok := visibleParentIDs[cat.ParentID]; !ok {
-				continue
-			}
+		if !visibleIDs[cat.ID] {
+			continue
 		}
 		items = append(items, categoryItem{
 			ID:           cat.ID,
@@ -361,6 +365,7 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 	stockDisplay := domaincatalog.StorefrontStockPolicy().Display(product.StockDisplayMode, stockStatus, stockCount)
 	respondChannelSuccess(c, gin.H{
 		"id":                    product.ID,
+		"category_id":           product.CategoryID,
 		"title":                 title,
 		"description":           description,
 		"image_url":             imageURL,

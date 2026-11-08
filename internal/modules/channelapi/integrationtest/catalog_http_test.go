@@ -60,6 +60,25 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 	if err := db.Create(&child).Error; err != nil {
 		t.Fatalf("create child category failed: %v", err)
 	}
+	grandchild := categorydomain.Category{
+		ParentID: child.ID,
+		Slug:     "steam-us",
+		NameJSON: jsonmap.JSON{"zh-CN": "Steam US"},
+	}
+	if err := db.Create(&grandchild).Error; err != nil {
+		t.Fatal(err)
+	}
+	inactive := categorydomain.Category{Slug: "inactive-parent", NameJSON: jsonmap.JSON{"zh-CN": "inactive"}}
+	if err := db.Create(&inactive).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&inactive).Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	orphan := categorydomain.Category{Slug: "under-inactive", ParentID: inactive.ID, NameJSON: jsonmap.JSON{"zh-CN": "orphan"}}
+	if err := db.Create(&orphan).Error; err != nil {
+		t.Fatal(err)
+	}
 	hidden := categorydomain.Category{
 		Slug:     "hidden",
 		NameJSON: jsonmap.JSON{"zh-CN": "hidden"},
@@ -105,8 +124,8 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected items array, got %T", payload.Data["items"])
 	}
-	if len(itemsValue) != 2 {
-		t.Fatalf("expected 2 visible categories, got %d", len(itemsValue))
+	if len(itemsValue) != 3 {
+		t.Fatalf("expected 3 visible category levels and no inactive branch, got %d", len(itemsValue))
 	}
 
 	itemsBySlug := make(map[string]map[string]any, len(itemsValue))
@@ -117,6 +136,12 @@ func TestGetCategoriesIncludesParentIDAndVisibleParent(t *testing.T) {
 		}
 		slug, _ := row["slug"].(string)
 		itemsBySlug[slug] = row
+	}
+	if item, ok := itemsBySlug[grandchild.Slug]; !ok || item["parent_id"] != float64(child.ID) {
+		t.Fatalf("third-level category or its parent is missing: %#v", item)
+	}
+	if _, ok := itemsBySlug[orphan.Slug]; ok {
+		t.Fatal("category below an inactive ancestor was exposed")
 	}
 
 	parentItem, ok := itemsBySlug["games"]

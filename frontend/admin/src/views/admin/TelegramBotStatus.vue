@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { AdminTelegramBotRuntimeStatus } from '@/api/types'
@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatDate } from '@/utils/format'
+import { formatTelegramBotWarning } from '@/utils/telegramBotWarnings'
 import { Wifi, WifiOff, RefreshCw } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -17,6 +18,11 @@ const runtimeStatus = ref<AdminTelegramBotRuntimeStatus | null>(null)
 const isConnected = computed(() => {
   if (!runtimeStatus.value) return false
   return runtimeStatus.value.connected === true
+})
+
+const configSynced = computed(() => {
+  const status = runtimeStatus.value
+  return Boolean(status?.last_config_sync_at) && status?.applied_config_version === status?.config_version
 })
 
 const fetchRuntimeStatus = async () => {
@@ -39,6 +45,7 @@ const formatRuntimeDate = (value: unknown) => {
 const formatWebhookStatus = (value?: string) => {
   if (!value) return '-'
   const normalized = value.trim().toLowerCase()
+  if (normalized === 'long_polling') return t('telegramBot.status.longPolling')
   if (['active', 'enabled', 'connected', 'ok'].includes(normalized)) {
     return t('telegramBot.status.webhookStatusActive')
   }
@@ -51,6 +58,7 @@ const formatWebhookStatus = (value?: string) => {
 const formatLicenseStatus = (value?: string) => {
   if (!value) return t('telegramBot.status.licenseStatusUnknown')
   const normalized = value.trim().toLowerCase()
+  if (normalized === 'community') return t('telegramBot.status.licenseStatusCommunity')
   if (normalized === 'active') return t('telegramBot.status.licenseStatusActive')
   if (normalized === 'expired') return t('telegramBot.status.licenseStatusExpired')
   if (normalized === 'revoked') return t('telegramBot.status.licenseStatusRevoked')
@@ -66,19 +74,19 @@ const getLicenseBadgeVariant = (value?: string) => {
   return 'secondary'
 }
 
-const formatWarning = (value: string) => {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === 'license_lease_expiring_soon') {
-    return t('telegramBot.status.warningLeaseExpiringSoon')
-  }
-  if (normalized === 'license_lease_expired') {
-    return t('telegramBot.status.warningLeaseExpired')
-  }
-  return value
-}
+const formatWarning = (value: string) => formatTelegramBotWarning(value, t)
+
+let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 onMounted(() => {
   fetchRuntimeStatus()
+  refreshTimer = setInterval(() => {
+    if (!loading.value) fetchRuntimeStatus()
+  }, 60_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
@@ -130,6 +138,16 @@ onMounted(() => {
             <div class="rounded-lg border p-4">
               <p class="text-sm text-muted-foreground mb-1">{{ t('telegramBot.status.configVersion') }}</p>
               <p class="text-lg font-semibold">{{ runtimeStatus.config_version ?? '-' }}</p>
+            </div>
+            <div class="rounded-lg border p-4">
+              <p class="text-sm text-muted-foreground mb-1">{{ t('telegramBot.status.appliedConfigVersion') }}</p>
+              <p class="text-lg font-semibold">{{ runtimeStatus.last_config_sync_at ? runtimeStatus.applied_config_version ?? '-' : '-' }}</p>
+            </div>
+            <div class="rounded-lg border p-4">
+              <p class="text-sm text-muted-foreground mb-1">{{ t('telegramBot.status.configSyncStatus') }}</p>
+              <Badge :variant="configSynced ? 'default' : 'secondary'">
+                {{ configSynced ? t('telegramBot.status.configSynced') : t('telegramBot.status.configPending') }}
+              </Badge>
             </div>
             <div class="rounded-lg border p-4">
               <p class="text-sm text-muted-foreground mb-1">{{ t('telegramBot.status.lastSeenAt') }}</p>

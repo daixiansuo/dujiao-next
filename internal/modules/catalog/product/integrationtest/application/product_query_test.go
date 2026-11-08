@@ -66,6 +66,52 @@ func TestProductServiceListPublicIncludesChildProductsForParentCategory(t *testi
 	}
 }
 
+func TestProductServiceListPublicIncludesThreeLevelsAndStopsAtInactiveBranch(t *testing.T) {
+	svc, db := newProductServiceForTest(t)
+	root := categorydomain.Category{Slug: "three-root", NameJSON: jsonmap.JSON{"zh-CN": "Root"}}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	child := categorydomain.Category{Slug: "three-child", ParentID: root.ID, NameJSON: jsonmap.JSON{"zh-CN": "Child"}}
+	if err := db.Create(&child).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaf := categorydomain.Category{Slug: "three-leaf", ParentID: child.ID, NameJSON: jsonmap.JSON{"zh-CN": "Leaf"}}
+	if err := db.Create(&leaf).Error; err != nil {
+		t.Fatal(err)
+	}
+	inactive := categorydomain.Category{Slug: "three-disabled", ParentID: root.ID, NameJSON: jsonmap.JSON{"zh-CN": "Inactive"}}
+	if err := db.Create(&inactive).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&inactive).Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	hiddenLeaf := categorydomain.Category{Slug: "three-hidden", ParentID: inactive.ID, NameJSON: jsonmap.JSON{"zh-CN": "Hidden"}}
+	if err := db.Create(&hiddenLeaf).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, category := range []categorydomain.Category{root, child, leaf, hiddenLeaf} {
+		product := productdomain.Product{CategoryID: category.ID, Slug: "product-" + category.Slug, TitleJSON: jsonmap.JSON{"zh-CN": category.Slug}, PriceAmount: money.FromDecimal(decimal.NewFromInt(10)), IsActive: true}
+		if err := db.Create(&product).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		id   uint
+		want int64
+	}{{root.ID, 3}, {child.ID, 2}, {leaf.ID, 1}, {inactive.ID, 0}} {
+		_, total, err := svc.Read.ListPublic(strconv.FormatUint(uint64(tc.id), 10), "", 1, 20)
+		if err != nil || total != tc.want {
+			t.Fatalf("category %d: total=%d want=%d err=%v", tc.id, total, tc.want, err)
+		}
+	}
+	_, total, err := svc.Read.ListPublicExact(strconv.FormatUint(uint64(root.ID), 10), 1, 20)
+	if err != nil || total != 1 {
+		t.Fatalf("exact query changed: total=%d err=%v", total, err)
+	}
+}
+
 func TestProductServiceListPublicSortOrderDescending(t *testing.T) {
 	svc, db := newProductServiceForTest(t)
 

@@ -236,20 +236,29 @@ func expandPublicCategoryIDs(categoryRepo CategoryRepository, categoryID string)
 	if !category.IsActive {
 		return []uint{}, nil
 	}
-	if category.ParentID > 0 {
-		return []uint{category.ID}, nil
-	}
-
 	categories, err := categoryRepo.List()
 	if err != nil {
 		return nil, err
 	}
 
-	categoryIDs := []uint{category.ID}
+	children := make(map[uint][]uint)
 	for _, item := range categories {
-		if item.ParentID == category.ID && item.IsActive {
-			categoryIDs = append(categoryIDs, item.ID)
+		if item.IsActive {
+			children[item.ParentID] = append(children[item.ParentID], item.ID)
 		}
+	}
+	var categoryIDs []uint
+	pending := []uint{category.ID}
+	seen := make(map[uint]bool)
+	for len(pending) > 0 {
+		id := pending[0]
+		pending = pending[1:]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		categoryIDs = append(categoryIDs, id)
+		pending = append(pending, children[id]...)
 	}
 	return categoryIDs, nil
 }

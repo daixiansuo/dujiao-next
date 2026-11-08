@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { AdminTelegramBotRuntimeStatus } from '@/api/types'
@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatDate } from '@/utils/format'
+import { formatTelegramBotWarning } from '@/utils/telegramBotWarnings'
 import { Bot, ExternalLink, Wifi, WifiOff, RefreshCw, Send, KeyRound, ShieldAlert } from 'lucide-vue-next'
 
 const LICENSE_PURCHASE_URL = 'https://dujiao-next.com/services/telegram-bot'
@@ -19,6 +20,13 @@ const runtimeStatus = ref<AdminTelegramBotRuntimeStatus | null>(null)
 const isConnected = computed(() => {
   if (!runtimeStatus.value) return false
   return runtimeStatus.value.connected === true
+})
+
+const isCommunity = computed(() => runtimeStatus.value?.license_status?.trim().toLowerCase() === 'community')
+
+const configSynced = computed(() => {
+  const status = runtimeStatus.value
+  return Boolean(status?.last_config_sync_at) && status?.applied_config_version === status?.config_version
 })
 
 const fetchRuntimeStatus = async () => {
@@ -41,6 +49,7 @@ const formatRuntimeDate = (value: unknown) => {
 const formatWebhookStatus = (value?: string) => {
   if (!value) return '-'
   const normalized = value.trim().toLowerCase()
+  if (normalized === 'long_polling') return t('telegramBot.status.longPolling')
   if (['active', 'enabled', 'connected', 'ok'].includes(normalized)) {
     return t('telegramBot.status.webhookStatusActive')
   }
@@ -53,6 +62,7 @@ const formatWebhookStatus = (value?: string) => {
 const formatLicenseStatus = (value?: string) => {
   if (!value) return t('telegramBot.status.licenseStatusUnknown')
   const normalized = value.trim().toLowerCase()
+  if (normalized === 'community') return t('telegramBot.status.licenseStatusCommunity')
   if (normalized === 'active') return t('telegramBot.status.licenseStatusActive')
   if (normalized === 'expired') return t('telegramBot.status.licenseStatusExpired')
   if (normalized === 'revoked') return t('telegramBot.status.licenseStatusRevoked')
@@ -64,21 +74,21 @@ const formatLicenseStatus = (value?: string) => {
 const formatWarnings = (warnings?: string[]) => {
   if (!warnings?.length) return t('telegramBot.status.licenseWarningsEmpty')
   return warnings
-    .map((warning) => {
-      const normalized = warning.trim().toLowerCase()
-      if (normalized === 'license_lease_expiring_soon') {
-        return t('telegramBot.status.warningLeaseExpiringSoon')
-      }
-      if (normalized === 'license_lease_expired') {
-        return t('telegramBot.status.warningLeaseExpired')
-      }
-      return warning
-    })
+    .map((warning) => formatTelegramBotWarning(warning, t))
     .join(' / ')
 }
 
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+
 onMounted(() => {
   fetchRuntimeStatus()
+  refreshTimer = setInterval(() => {
+    if (!loading.value) fetchRuntimeStatus()
+  }, 60_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
@@ -90,7 +100,7 @@ onMounted(() => {
     </div>
 
     <!-- License Purchase Notice -->
-    <Card class="border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20">
+    <Card v-if="!isCommunity" class="border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20">
       <CardContent class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div class="flex items-start gap-3">
           <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
@@ -132,7 +142,7 @@ onMounted(() => {
         </div>
       </CardHeader>
       <CardContent>
-        <div v-if="isConnected && runtimeStatus" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div v-if="runtimeStatus?.last_seen_at" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           <div>
             <p class="text-sm text-muted-foreground">{{ t('telegramBot.status.botVersion') }}</p>
             <p class="text-sm font-medium">{{ runtimeStatus.bot_version || '-' }}</p>
@@ -148,6 +158,16 @@ onMounted(() => {
           <div>
             <p class="text-sm text-muted-foreground">{{ t('telegramBot.status.configVersion') }}</p>
             <p class="text-sm font-medium">{{ runtimeStatus.config_version ?? '-' }}</p>
+          </div>
+          <div>
+            <p class="text-sm text-muted-foreground">{{ t('telegramBot.status.appliedConfigVersion') }}</p>
+            <p class="text-sm font-medium">{{ runtimeStatus.last_config_sync_at ? runtimeStatus.applied_config_version ?? '-' : '-' }}</p>
+          </div>
+          <div>
+            <p class="text-sm text-muted-foreground">{{ t('telegramBot.status.configSyncStatus') }}</p>
+            <Badge :variant="configSynced ? 'default' : 'secondary'">
+              {{ configSynced ? t('telegramBot.status.configSynced') : t('telegramBot.status.configPending') }}
+            </Badge>
           </div>
           <div>
             <p class="text-sm text-muted-foreground">{{ t('telegramBot.status.machineCode') }}</p>

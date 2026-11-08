@@ -382,6 +382,7 @@ export interface AdminTelegramBotRuntimeStatus {
   license_expires_at?: string
   warnings?: string[]
   config_version: number
+  applied_config_version?: number
   last_config_sync_at?: string
 }
 

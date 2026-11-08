@@ -41,12 +41,13 @@ func NewChannelBotHandler(settingsSvc BotSettings, tokens ChannelBotTokenProvide
 }
 
 type reportHeartbeatRequest struct {
-	BotVersion       string   `json:"bot_version"`
-	WebhookStatus    string   `json:"webhook_status"`
-	MachineCode      string   `json:"machine_code"`
-	LicenseStatus    string   `json:"license_status"`
-	LicenseExpiresAt string   `json:"license_expires_at"`
-	Warnings         []string `json:"warnings"`
+	BotVersion           string   `json:"bot_version"`
+	WebhookStatus        string   `json:"webhook_status"`
+	MachineCode          string   `json:"machine_code"`
+	LicenseStatus        string   `json:"license_status"`
+	LicenseExpiresAt     string   `json:"license_expires_at"`
+	Warnings             []string `json:"warnings"`
+	AppliedConfigVersion *int     `json:"applied_config_version" binding:"omitempty,gte=0"`
 }
 
 // GetBotConfig GET /api/v1/channel/telegram/config
@@ -92,18 +93,29 @@ func (h *ChannelBotHandler) ReportHeartbeat(c *gin.Context) {
 		current = settingsmessaging.DefaultTelegramBotRuntimeStatus()
 	}
 
+	if req.AppliedConfigVersion != nil && *req.AppliedConfigVersion > current.ConfigVersion {
+		channelresponse.Error(c, http.StatusBadRequest, response.CodeBadRequest, "validation_error", "error.bad_request", nil)
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	updated := settingsmessaging.TelegramBotRuntimeStatusSetting{
-		Connected:        true,
-		LastSeenAt:       now,
-		BotVersion:       req.BotVersion,
-		WebhookStatus:    req.WebhookStatus,
-		MachineCode:      req.MachineCode,
-		LicenseStatus:    req.LicenseStatus,
-		LicenseExpiresAt: req.LicenseExpiresAt,
-		Warnings:         append([]string(nil), req.Warnings...),
-		ConfigVersion:    current.ConfigVersion,
-		LastConfigSyncAt: current.LastConfigSyncAt,
+		Connected:            true,
+		LastSeenAt:           now,
+		BotVersion:           req.BotVersion,
+		WebhookStatus:        req.WebhookStatus,
+		MachineCode:          req.MachineCode,
+		LicenseStatus:        req.LicenseStatus,
+		LicenseExpiresAt:     req.LicenseExpiresAt,
+		Warnings:             append([]string(nil), req.Warnings...),
+		ConfigVersion:        current.ConfigVersion,
+		AppliedConfigVersion: current.AppliedConfigVersion,
+		LastConfigSyncAt:     current.LastConfigSyncAt,
+	}
+
+	if req.AppliedConfigVersion != nil {
+		updated.AppliedConfigVersion = *req.AppliedConfigVersion
+		updated.LastConfigSyncAt = now
 	}
 
 	if err := h.settings.UpdateTelegramBotRuntimeStatus(updated); err != nil {

@@ -354,7 +354,7 @@ func (s *Service) GetTelegramBotRuntimeStatus() (settingsmessaging.TelegramBotRu
 	if value == nil {
 		return fallback, nil
 	}
-	return settingsmessaging.DecodeTelegramBotRuntimeStatus(value, fallback), nil
+	return settingsmessaging.TelegramBotRuntimeStatusAt(settingsmessaging.DecodeTelegramBotRuntimeStatus(value, fallback), time.Now()), nil
 }
 
 // UpdateTelegramBotRuntimeStatus 更新 Telegram Bot 运行时状态。
