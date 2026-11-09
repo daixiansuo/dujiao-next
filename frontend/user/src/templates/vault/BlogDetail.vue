@@ -18,7 +18,7 @@
       </nav>
 
       <Card class="p-[30px]">
-        <div v-if="post.thumbnail" class="mb-7 h-80 overflow-hidden rounded-md">
+        <div v-if="post.thumbnail" class="mb-7 aspect-[15/7] w-full overflow-hidden rounded-md">
           <img :src="getImageUrl(post.thumbnail)" :alt="getLocalizedText(post.title)" loading="lazy" class="h-full w-full object-cover" />
         </div>
 
