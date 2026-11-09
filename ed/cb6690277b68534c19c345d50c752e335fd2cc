@@ -1,0 +1,41 @@
+internal/modules/content/transport/http/public_handler.go
+  s_7046feb407b996::t_9e0cd0eaac68fb 50-58,60-64
+frontend/user/src/i18n/locales/en-US.json
+  s_7046feb407b996::t_9e0cd0eaac68fb 250-251,261
+frontend/user/src/i18n/locales/zh-TW.json
+  s_7046feb407b996::t_9e0cd0eaac68fb 250-251,261
+frontend/user/src/templates/vault/Blog.vue
+  s_7046feb407b996::t_9e0cd0eaac68fb 13-19,21-29,86-87
+frontend/user/src/api/index.ts
+  s_7046feb407b996::t_9e0cd0eaac68fb 56
+internal/modules/content/application/post_service.go
+  s_7046feb407b996::t_9e0cd0eaac68fb 27-31,65-79,85
+frontend/user/src/templates/vault/BlogDetail.vue
+  s_7046feb407b996::t_9e0cd0eaac68fb 28
+frontend/user/src/composables/usePostList.ts
+  s_7046feb407b996::t_9e0cd0eaac68fb 4,10,16,33-36,55,67-69,71,73-74,76-79,82,88-108,114,116,120,122-123,127,131,142-144
+frontend/user/src/api/product.ts
+  s_7046feb407b996::t_9e0cd0eaac68fb 13-16
+frontend/user/src/i18n/locales/zh-CN.json
+  s_7046feb407b996::t_9e0cd0eaac68fb 198-199,209
+internal/modules/content/contract/query.go
+  s_7046feb407b996::t_9e0cd0eaac68fb 17
+internal/modules/content/infrastructure/gormstore/post_store.go
+  s_7046feb407b996::t_9e0cd0eaac68fb 54-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "edcb6690277b68534c19c345d50c752e335fd2cc",
+  "prompts": {},
+  "sessions": {
+    "s_7046feb407b996": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be6f-131e-7063-b520-be05ef0b88b2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
