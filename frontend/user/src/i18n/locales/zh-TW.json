@@ -247,6 +247,8 @@
     "guest": "遊客可購"
   },
   "blog": {
+    "categoryLabel": "分類",
+    "allCategories": "全部",
     "subtitle": "最新文章和動態",
     "readMore": "閱讀更多",
     "empty": "暫無文章",
@@ -256,7 +258,7 @@
     "relatedProducts": "相關商品"
   },
   "blogDetail": {
-    "backToBlog": "返回部落格列表",
+    "backToBlog": "返回列表",
     "backToNotice": "返回公告列表",
     "notFound": "文章不存在"
   },

@@ -47,11 +47,21 @@ func NewPublicHandler(posts PublicPostQueries, categories PublicPostCategoryQuer
 // GetPosts 获取公开文章或公告列表。
 func (h *PublicHandler) GetPosts(c *gin.Context) {
 	page, pageSize := ginutil.ParsePagination(c)
+	var categoryID uint64
+	if raw := c.Query("category_id"); raw != "" {
+		var err error
+		categoryID, err = strconv.ParseUint(raw, 10, strconv.IntSize)
+		if err != nil {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.post_category_invalid", nil)
+			return
+		}
+	}
 	posts, total, err := h.posts.ListPublic(c.Request.Context(), contentapp.PublicPostQuery{
-		Type:     c.Query("type"),
-		Search:   c.Query("search"),
-		Page:     page,
-		PageSize: pageSize,
+		CategoryID: uint(categoryID),
+		Type:       c.Query("type"),
+		Search:     c.Query("search"),
+		Page:       page,
+		PageSize:   pageSize,
 	})
 	if err != nil {
 		ginutil.RespondError(c, response.CodeInternal, "error.post_fetch_failed", err)

@@ -24,10 +24,11 @@ type CreatePostInput struct {
 
 // PublicPostQuery 描述公开文章列表查询。
 type PublicPostQuery struct {
-	Type     string
-	Search   string
-	Page     int
-	PageSize int
+	CategoryID uint
+	Type       string
+	Search     string
+	Page       int
+	PageSize   int
 }
 
 // AdminPostQuery 描述后台文章列表查询。
@@ -61,11 +62,27 @@ func NewPostService(posts contract.PostStore, relations contract.PostProductRela
 
 // ListPublic 获取公开文章列表。
 func (s *PostService) ListPublic(ctx context.Context, query PublicPostQuery) ([]domain.Post, int64, error) {
+	var categoryIDs []uint
+	if query.CategoryID > 0 {
+		categoryIDs = []uint{query.CategoryID}
+		if s.categories != nil {
+			categories, err := s.categories.ListActive(ctx)
+			if err != nil {
+				return nil, 0, err
+			}
+			for _, category := range categories {
+				if category.ParentID != nil && *category.ParentID == query.CategoryID {
+					categoryIDs = append(categoryIDs, category.ID)
+				}
+			}
+		}
+	}
 	return s.posts.List(ctx, contract.PostQuery{
 		Page:          query.Page,
 		PageSize:      query.PageSize,
 		Type:          query.Type,
 		Search:        query.Search,
+		CategoryIDs:   categoryIDs,
 		OnlyPublished: true,
 		Order:         contract.PostOrderPublishedDesc,
 	})

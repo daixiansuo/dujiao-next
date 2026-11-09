@@ -10,6 +10,23 @@
       <Button v-if="searchKeyword" type="button" variant="ghost" size="sm" class="absolute right-1.5 top-1/2 h-8 -translate-y-1/2 rounded-full" @click="searchKeyword = ''">{{ t('blog.searchClear') }}</Button>
     </div>
 
+    <div v-if="categories.length" class="mb-7 flex items-start gap-3">
+      <span class="shrink-0 py-2 text-sm text-muted-foreground">{{ t('blog.categoryLabel') }}</span>
+      <div class="flex min-w-0 flex-wrap gap-2" role="group" :aria-label="t('blog.categoryLabel')">
+        <button
+          v-for="category in [{ id: null, name: null }, ...categories]"
+          :key="category.id ?? 'all'"
+          type="button"
+          class="max-w-full break-words rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          :class="selectedCategory === category.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
+          :aria-pressed="selectedCategory === category.id"
+          @click="changeCategory(category.id)"
+        >
+          {{ category.id === null ? t('blog.allCategories') : getLocalizedText(category.name) }}
+        </button>
+      </div>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="grid gap-5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
       <div v-for="i in 6" :key="i" class="h-[280px] rounded-xl border bg-card opacity-50"></div>
@@ -29,7 +46,6 @@
           </div>
           <div class="mb-1 flex items-center gap-2.5">
             <Badge :variant="post.type === 'blog' ? 'info' : 'warning'" size="sm" class="rounded-full">{{ post.type === 'blog' ? t('nav.blog') : t('nav.notice') }}</Badge>
-            <span class="text-xs font-semibold text-muted-foreground">{{ formatDate(post.published_at) }}</span>
           </div>
           <h3 class="text-lg font-bold">{{ getLocalizedText(post.title) }}</h3>
           <p class="mt-1.5 flex-1 text-sm leading-relaxed text-muted-foreground">{{ getLocalizedText(post.summary) }}</p>
@@ -67,6 +83,6 @@ const { t } = useI18n()
 
 const {
   loading, posts, currentPage, totalPages, searchKeyword,
-  getLocalizedText, formatDate, changePage,
-} = usePostList('blog', { title: () => t('nav.blog'), canonicalPath: '/blog' })
+  categories, selectedCategory, changeCategory, getLocalizedText, changePage,
+} = usePostList('blog', { title: () => t('nav.blog'), canonicalPath: '/blog' }, { categoryFilter: true })
 </script>

@@ -25,7 +25,7 @@
         <header class="mb-6 border-b pb-6">
           <div class="mb-3.5 flex items-center gap-3">
             <Badge :variant="post.type === 'blog' ? 'info' : 'warning'" size="sm" class="rounded-full">{{ post.type === 'blog' ? t('nav.blog') : t('nav.notice') }}</Badge>
-            <span class="text-[13px] font-semibold text-muted-foreground">{{ formatDate(post.published_at) }}</span>
+            <span v-if="post.type === 'notice'" class="text-[13px] font-semibold text-muted-foreground">{{ formatDate(post.published_at) }}</span>
           </div>
           <h1 class="text-[34px] font-extrabold leading-tight">{{ getLocalizedText(post.title) }}</h1>
           <p v-if="post.summary" class="mt-3.5 text-[17px] leading-relaxed text-muted-foreground">{{ getLocalizedText(post.summary) }}</p>

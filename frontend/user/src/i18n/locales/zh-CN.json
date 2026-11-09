@@ -195,6 +195,8 @@
     "quickBuy": "购买"
   },
   "blog": {
+    "categoryLabel": "分类",
+    "allCategories": "全部",
     "subtitle": "最新文章和动态",
     "readMore": "阅读更多",
     "empty": "暂无文章",
@@ -204,7 +206,7 @@
     "relatedProducts": "相关商品"
   },
   "blogDetail": {
-    "backToBlog": "返回博客列表",
+    "backToBlog": "返回列表",
     "backToNotice": "返回公告列表",
     "notFound": "文章不存在"
   },

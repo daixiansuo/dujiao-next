@@ -10,6 +10,10 @@ export const postAPI = {
     detail: (slug: string) => api.get(`/public/posts/${slug}`),
 }
 
+export const postCategoryAPI = {
+    list: () => api.get('/public/post-categories'),
+}
+
 export const bannerAPI = {
     list: (params?: any) => api.get('/public/banners', { params }),
 }

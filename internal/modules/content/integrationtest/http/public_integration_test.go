@@ -230,3 +230,79 @@ func TestPublicContentHandlersPreserveRepositoryErrorMapping(t *testing.T) {
 		t.Fatalf("category repository error should be observable as internal error, got %#v", categories)
 	}
 }
+
+func TestPublicPostsCategoryFilteringPreservesSearchAndPagination(t *testing.T) {
+	handler, _, _, _, db := setupPublicContentHandlerTest(t)
+	router := publicContentTestRouter(handler)
+	parent := contentdomain.PostCategory{Slug: "social", NameJSON: jsonmap.JSON{"zh-CN": "Social"}, IsActive: true}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatal(err)
+	}
+	child := contentdomain.PostCategory{Slug: "tiktok", ParentID: &parent.ID, NameJSON: jsonmap.JSON{"zh-CN": "TikTok"}, IsActive: true}
+	inactive := contentdomain.PostCategory{Slug: "inactive", ParentID: &parent.ID, NameJSON: jsonmap.JSON{"zh-CN": "Inactive"}, IsActive: true}
+	other := contentdomain.PostCategory{Slug: "other", NameJSON: jsonmap.JSON{"zh-CN": "Other"}, IsActive: true}
+	for _, category := range []*contentdomain.PostCategory{&child, &inactive, &other} {
+		if err := db.Create(category).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Model(&inactive).Update("is_active", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	addPost := func(slug, postType string, categoryID *uint, published bool) {
+		t.Helper()
+		now := time.Now().UTC()
+		post := contentdomain.Post{Slug: slug, Type: postType, TitleJSON: jsonmap.JSON{"zh-CN": slug}, CategoryID: categoryID, IsPublished: published, PublishedAt: &now}
+		if err := db.Create(&post).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 13; i++ {
+		addPost(fmt.Sprintf("tiktok-%02d", i), constants.PostTypeBlog, &child.ID, true)
+	}
+	// 父分类可能保留旧文章；停用分类和未分类文章仍应出现在全部教程中。
+	addPost("parent-legacy", constants.PostTypeBlog, &parent.ID, true)
+	addPost("inactive-post", constants.PostTypeBlog, &inactive.ID, true)
+	addPost("other-post", constants.PostTypeBlog, &other.ID, true)
+	addPost("uncategorized", constants.PostTypeBlog, nil, true)
+	addPost("tiktok-draft", constants.PostTypeBlog, &child.ID, false)
+	addPost("notice", constants.PostTypeNotice, nil, true)
+
+	for _, tc := range []struct {
+		name     string
+		query    string
+		total    int64
+		count    int
+		pages    int64
+		wantSlug string
+	}{
+		{"all", "type=blog", 17, 12, 2, ""},
+		{"category first page", fmt.Sprintf("type=blog&category_id=%d", child.ID), 13, 12, 2, ""},
+		{"category second page", fmt.Sprintf("type=blog&category_id=%d&page=2", child.ID), 13, 1, 2, "tiktok-00"},
+		{"parent includes active children", fmt.Sprintf("type=blog&category_id=%d", parent.ID), 14, 12, 2, ""},
+		{"category and search", fmt.Sprintf("type=blog&category_id=%d&search=tiktok-12", child.ID), 1, 1, 1, "tiktok-12"},
+		{"search outside category", fmt.Sprintf("type=blog&category_id=%d&search=other-post", child.ID), 0, 0, 0, ""},
+		{"unknown category", "type=blog&category_id=999999", 0, 0, 0, ""},
+		{"notice unchanged", "type=notice", 1, 1, 1, "notice"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := requestPublicContent(t, router, "/api/v1/public/posts?page_size=12&"+tc.query)
+			var got struct {
+				StatusCode int `json:"status_code"`
+				Data       []struct {
+					Slug string `json:"slug"`
+				} `json:"data"`
+				Pagination response.Pagination `json:"pagination"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.StatusCode != response.CodeOK || got.Pagination.Total != tc.total || len(got.Data) != tc.count || got.Pagination.TotalPage != tc.pages {
+				t.Fatalf("unexpected filtered response: %s", recorder.Body.String())
+			}
+			if tc.wantSlug != "" && got.Data[0].Slug != tc.wantSlug {
+				t.Fatalf("slug = %q, want %q", got.Data[0].Slug, tc.wantSlug)
+			}
+		})
+	}
+}

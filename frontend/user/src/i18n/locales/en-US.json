@@ -247,6 +247,8 @@
     "guest": "Guest purchase"
   },
   "blog": {
+    "categoryLabel": "Category",
+    "allCategories": "All",
     "subtitle": "Latest articles and updates",
     "readMore": "Read More",
     "empty": "No articles",
@@ -256,7 +258,7 @@
     "relatedProducts": "Related Products"
   },
   "blogDetail": {
-    "backToBlog": "Back to Blog",
+    "backToBlog": "Back to list",
     "backToNotice": "Back to Notice",
     "notFound": "Article not found"
   },
