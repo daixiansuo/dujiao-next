@@ -119,6 +119,21 @@ const router = createRouter({
     },
     routes: [
         {
+            path: '/tools',
+            name: 'tools',
+            component: templateView('tools/Tools', () => import('../views/tools/Tools.vue')),
+        },
+        {
+            path: '/tools/2fa',
+            name: 'tools-2fa',
+            component: templateView('tools/TotpTool', () => import('../views/tools/TotpTool.vue')),
+        },
+        {
+            path: '/tools/text',
+            name: 'tools-text',
+            component: templateView('tools/TextTool', () => import('../views/tools/TextTool.vue')),
+        },
+        {
             path: '/',
             name: 'home',
             component: templateView('Home', homeViewLoader),

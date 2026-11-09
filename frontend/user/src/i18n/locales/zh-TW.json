@@ -1,4 +1,72 @@
 {
+  "tools": {
+    "title": "工具箱",
+    "backToTools": "返回工具箱",
+    "description": "驗證碼產生與常用文字處理，開啟即可使用，無需登入。",
+    "localBadge": "在瀏覽器本機處理",
+    "privacy": "本工具不上傳密鑰或文字，也不將輸入儲存到瀏覽器儲存空間。離開頁面後輸入即清空。",
+    "open": "開啟工具",
+    "clear": "清空",
+    "copied": "已複製",
+    "copyFailed": "複製失敗，請手動選取並複製。",
+    "totp": {
+      "title": "2FA 驗證碼產生器",
+      "description": "輸入 Base32 密鑰或 otpauth 連結，產生每 30 秒更新的 6 位動態驗證碼。",
+      "inputLabel": "密鑰或 otpauth 連結",
+      "inputHint": "支援大小寫字母，密鑰中的空格和連字號會自動忽略。",
+      "placeholder": "貼上 Base32 密鑰或 otpauth://totp/… 連結",
+      "codeLabel": "目前驗證碼",
+      "remaining": "{seconds} 秒後更新",
+      "countdown": "驗證碼剩餘有效時間",
+      "waiting": "輸入有效密鑰後顯示驗證碼",
+      "copy": "複製驗證碼",
+      "compatibility": "支援 SHA-1、6 位、30 秒的 TOTP。優先使用網站已校正的時間；若驗證碼不符，請檢查裝置時間及原服務的參數。此工具不修改你的 IDID 帳號兩步驟驗證設定。",
+      "errors": {
+        "invalidSecret": "密鑰格式無效，請檢查是否為完整的 Base32 密鑰。",
+        "invalidUri": "otpauth 連結無效，請檢查密鑰和參數是否完整且沒有重複。",
+        "unsupportedType": "僅支援 TOTP 時間驗證碼，不支援 HOTP 計數器驗證碼。",
+        "unsupportedParameters": "目前僅支援 SHA1、6 位、30 秒，請檢查連結中的參數。",
+        "unavailable": "目前瀏覽器無法使用安全加密功能，請使用 HTTPS 頁面和較新的瀏覽器。",
+        "generationFailed": "產生失敗，請檢查瀏覽器是否支援 Web Crypto，並重新輸入密鑰。"
+      }
+    },
+    "text": {
+      "title": "文字處理",
+      "description": "依分隔符號換行、尋找取代、逐行去重、去除首尾空白，以及行內字元反轉。",
+      "inputLabel": "原始文字",
+      "outputLabel": "處理結果",
+      "inputPlaceholder": "在這裡貼上需要處理的文字",
+      "outputPlaceholder": "點擊「執行處理」後顯示結果",
+      "outputHint": "結果保留至下次執行；可作為輸入繼續處理。",
+      "operationLabel": "選擇處理方式",
+      "operations": {
+        "split": "分隔符號轉換行",
+        "replace": "尋找取代",
+        "deduplicate": "逐行去重",
+        "trim": "去除每行首尾空白",
+        "reverse": "每行字元反轉"
+      },
+      "hints": {
+        "split": "將指定分隔符號的每次出現取代為換行，依字面內容比對。",
+        "replace": "依字面內容全部取代，不使用正規表示式。",
+        "deduplicate": "依整行內容精確去重，保留首次出現的順序，不自動去除空白。",
+        "trim": "僅去除每一行開頭和結尾的空白，保留行內空白及空行。",
+        "reverse": "分別反轉每一行中的字元，保留行的順序，並保持組合表情與字元完整。"
+      },
+      "delimiterLabel": "分隔符號",
+      "delimiterPlaceholder": "例如：逗號、分號或 ----",
+      "searchLabel": "尋找內容",
+      "replacementLabel": "取代為",
+      "replacementHint": "留空表示刪除符合內容。",
+      "run": "執行處理",
+      "copy": "複製結果",
+      "useOutput": "結果作為輸入",
+      "errors": {
+        "emptyDelimiter": "請先輸入分隔符號。",
+        "emptySearch": "請先輸入要尋找的內容。"
+      }
+    }
+  },
   "common": {
     "close": "關閉",
     "siteName": "Dujiao-Next",

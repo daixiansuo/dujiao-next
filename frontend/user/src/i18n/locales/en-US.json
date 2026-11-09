@@ -1,4 +1,72 @@
 {
+  "tools": {
+    "title": "Toolbox",
+    "backToTools": "Back to toolbox",
+    "description": "Generate verification codes and process text instantly, without signing in.",
+    "localBadge": "Processed in your browser",
+    "privacy": "This tool does not upload your secret or text, or save your input in browser storage. Input is cleared when you leave the page.",
+    "open": "Open tool",
+    "clear": "Clear",
+    "copied": "Copied",
+    "copyFailed": "Could not copy. Please select and copy the text manually.",
+    "totp": {
+      "title": "2FA Code Generator",
+      "description": "Enter a Base32 secret or otpauth link to generate a 6-digit code that refreshes every 30 seconds.",
+      "inputLabel": "Secret or otpauth link",
+      "inputHint": "Letters are case-insensitive. Spaces and hyphens in the secret are ignored.",
+      "placeholder": "Paste a Base32 secret or otpauth://totp/… link",
+      "codeLabel": "Current code",
+      "remaining": "Refreshes in {seconds}s",
+      "countdown": "Code validity remaining",
+      "waiting": "Enter a valid secret to display a code",
+      "copy": "Copy code",
+      "compatibility": "Supports SHA-1, 6-digit, 30-second TOTP. Uses the site’s corrected time when available. If a code does not match, check your device clock and the original service’s settings. This tool does not change your IDID account’s two-factor settings.",
+      "errors": {
+        "invalidSecret": "Invalid secret. Check that you have the complete Base32 secret.",
+        "invalidUri": "Invalid otpauth link. Check for missing or duplicate secret and parameters.",
+        "unsupportedType": "Only time-based TOTP codes are supported. Counter-based HOTP is not supported.",
+        "unsupportedParameters": "Only SHA1, 6 digits and a 30-second period are supported. Check the link parameters.",
+        "unavailable": "Secure cryptography is unavailable. Open this page over HTTPS in a recent browser.",
+        "generationFailed": "Could not generate a code. Check Web Crypto support and enter the secret again."
+      }
+    },
+    "text": {
+      "title": "Text Tools",
+      "description": "Convert delimiters to newlines, find and replace, deduplicate lines, trim whitespace, or reverse characters within each line.",
+      "inputLabel": "Input text",
+      "outputLabel": "Result",
+      "inputPlaceholder": "Paste the text you want to process here",
+      "outputPlaceholder": "Select an operation and click “Process text”",
+      "outputHint": "The result stays until the next operation. Use it as input to continue processing.",
+      "operationLabel": "Choose an operation",
+      "operations": {
+        "split": "Delimiter to newline",
+        "replace": "Find and replace",
+        "deduplicate": "Deduplicate lines",
+        "trim": "Trim each line",
+        "reverse": "Reverse characters per line"
+      },
+      "hints": {
+        "split": "Replace every literal occurrence of the delimiter with a newline.",
+        "replace": "Replace all literal matches. Regular expressions are not used.",
+        "deduplicate": "Remove exact duplicate lines, keeping their first occurrence and preserving whitespace.",
+        "trim": "Remove leading and trailing whitespace on each line. Preserve interior whitespace and blank lines.",
+        "reverse": "Reverse characters within each line, keeping line order and combined emoji and characters intact."
+      },
+      "delimiterLabel": "Delimiter",
+      "delimiterPlaceholder": "For example: a comma, semicolon or ----",
+      "searchLabel": "Find",
+      "replacementLabel": "Replace with",
+      "replacementHint": "Leave empty to delete matches.",
+      "run": "Process text",
+      "copy": "Copy result",
+      "useOutput": "Use result as input",
+      "errors": {
+        "emptyDelimiter": "Enter a delimiter first.",
+        "emptySearch": "Enter the text to find first."
+      }
+    }
+  },
   "common": {
     "close": "Close",
     "siteName": "Dujiao-Next",
