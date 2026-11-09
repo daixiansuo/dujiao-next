@@ -35,26 +35,7 @@
     <!-- Posts -->
     <template v-else-if="posts.length > 0">
       <div class="grid gap-5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
-        <RouterLink
-          v-for="post in posts"
-          :key="post.id"
-          class="group flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition hover:-translate-y-1 hover:border-hairline-strong hover:shadow-[var(--shadow)]"
-          :to="`/blog/${post.slug}`"
-        >
-          <div v-if="post.thumbnail" class="aspect-[15/7] w-full shrink-0 overflow-hidden">
-            <img :src="getImageUrl(post.thumbnail)" :alt="getLocalizedText(post.title)" loading="lazy" class="h-full w-full object-cover" />
-          </div>
-          <div class="flex flex-1 flex-col p-[22px]">
-            <div class="mb-1 flex items-center gap-2.5">
-              <Badge :variant="post.type === 'blog' ? 'info' : 'warning'" size="sm" class="rounded-full">{{ post.type === 'blog' ? t('nav.blog') : t('nav.notice') }}</Badge>
-            </div>
-            <h3 class="text-lg font-bold">{{ getLocalizedText(post.title) }}</h3>
-            <p class="mt-1.5 flex-1 text-sm leading-relaxed text-muted-foreground">{{ getLocalizedText(post.summary) }}</p>
-            <span class="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
-              {{ t('blog.readMore') }} <ArrowRight class="h-4 w-4 transition group-hover:translate-x-0.5" />
-            </span>
-          </div>
-        </RouterLink>
+        <VaultPostCard v-for="post in posts" :key="post.id" :post="post" />
       </div>
 
       <div v-if="totalPages > 1" class="mt-8 flex items-center justify-center gap-3.5">
@@ -74,11 +55,10 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, BookOpen, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
-import { Badge } from '@/components/ui/badge'
+import { BookOpen, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getImageUrl } from '../../utils/image'
+import VaultPostCard from './components/VaultPostCard.vue'
 import { usePostList } from '../../composables/usePostList'
 
 const { t } = useI18n()

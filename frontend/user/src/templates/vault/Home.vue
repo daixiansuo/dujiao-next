@@ -140,18 +140,8 @@
         <div class="mb-[22px] flex flex-wrap items-end justify-between gap-4">
           <h2 class="text-[28px] font-extrabold">{{ t('home.latest.title') }}</h2>
         </div>
-        <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(228px,1fr))]">
-          <RouterLink
-            v-for="post in posts"
-            :key="post.id"
-            class="block h-full rounded-lg border bg-card p-[22px] transition hover:-translate-y-[3px] hover:border-hairline-strong hover:shadow-[var(--shadow)]"
-            :to="`/blog/${post.slug}`"
-          >
-            <span class="text-[12.5px] font-semibold text-muted-foreground">{{ formatDate(post.published_at) }}</span>
-            <h3 class="mt-2 line-clamp-2 text-[17px] font-bold">{{ getLocalizedText(post.title) }}</h3>
-            <p class="mt-2 line-clamp-2 text-sm text-muted-foreground">{{ getLocalizedText(post.summary) }}</p>
-            <span class="mt-3.5 inline-flex items-center gap-1.5 text-sm font-bold text-primary">{{ t('blog.readMore') }} <ChevronRight class="h-4 w-4" /></span>
-          </RouterLink>
+        <div class="grid gap-5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+          <VaultPostCard v-for="post in posts" :key="post.id" :post="post" />
         </div>
       </section>
     </template>
@@ -187,6 +177,7 @@ import { useProductListGroups } from '../../composables/useProductListGroups'
 import { usePageSeo } from '../../composables/usePageSeo'
 import { useAppStore } from '../../stores/app'
 import VaultProductCard from './components/VaultProductCard.vue'
+import VaultPostCard from './components/VaultPostCard.vue'
 import VaultProductListItem from './components/VaultProductListItem.vue'
 import VaultCategorySidebar from './components/VaultCategorySidebar.vue'
 import VaultBannerHero from './components/VaultBannerHero.vue'
@@ -266,8 +257,6 @@ const navBuiltin = computed(() => (appStore.config?.nav_config as { builtin?: Re
 const blogEnabled = computed(() => navBuiltin.value?.blog !== false)
 const noticeEnabled = computed(() => navBuiltin.value?.notice !== false)
 const latestVisible = computed(() => blogEnabled.value || noticeEnabled.value)
-
-const formatDate = (value: string) => (value ? new Date(value).toLocaleDateString() : '')
 
 // ==================== 公告弹窗（版本化可关闭，两种模式共用） ====================
 const { shouldShow } = useAnnouncement()
