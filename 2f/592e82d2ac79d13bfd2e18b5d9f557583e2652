@@ -1,0 +1,21 @@
+frontend/user/src/templates/vault/Blog.vue
+  s_031b7631ab0492::t_265a3ec4bece52 41,44,47-55
+frontend/user/src/templates/vault/BlogDetail.vue
+  s_031b7631ab0492::t_265a3ec4bece52 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "2f592e82d2ac79d13bfd2e18b5d9f557583e2652",
+  "prompts": {},
+  "sessions": {
+    "s_031b7631ab0492": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf44-3d1e-77d0-b7ca-a16e8b31d6fc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
