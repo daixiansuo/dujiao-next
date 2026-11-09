@@ -1,0 +1,48 @@
+frontend/user/src/i18n/locales/zh-CN.json
+  s_f7459cff2d60da::t_cdb20ce952426f 3-4
+  s_f7459cff2d60da::t_ccea087a8c3439 2,5-69
+frontend/user/tests/textTools.test.ts
+  s_f7459cff2d60da::t_1a6059ffb55c0e 1-33
+frontend/user/src/utils/totp.ts
+  s_f7459cff2d60da::t_1a6059ffb55c0e 1-81
+frontend/user/src/utils/textTools.ts
+  s_f7459cff2d60da::t_ccea087a8c3439 1-2
+  s_f7459cff2d60da::t_1a6059ffb55c0e 3-33
+frontend/user/src/views/tools/Tools.vue
+  s_f7459cff2d60da::t_337ff1721caa44 1-32
+frontend/user/src/views/tools/TotpTool.vue
+  s_f7459cff2d60da::t_337ff1721caa44 1-57
+frontend/user/src/components/tools/ToolPage.vue
+  s_f7459cff2d60da::t_cdb20ce952426f 4,15-23
+  s_f7459cff2d60da::t_337ff1721caa44 1-3,5-14,24-36
+frontend/user/src/i18n/locales/zh-TW.json
+  s_f7459cff2d60da::t_ccea087a8c3439 2,5-69
+  s_f7459cff2d60da::t_cdb20ce952426f 3-4
+frontend/user/tests/totp.test.ts
+  s_f7459cff2d60da::t_1a6059ffb55c0e 1-51
+frontend/user/src/router/index.ts
+  s_f7459cff2d60da::t_337ff1721caa44 121-135
+frontend/user/src/composables/useTotpTool.ts
+  s_f7459cff2d60da::t_337ff1721caa44 1-83
+frontend/user/src/views/tools/TextTool.vue
+  s_f7459cff2d60da::t_337ff1721caa44 1-93
+frontend/user/src/i18n/locales/en-US.json
+  s_f7459cff2d60da::t_cdb20ce952426f 3-4
+  s_f7459cff2d60da::t_ccea087a8c3439 2,5-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20260915",
+  "base_commit_sha": "b3840b0f5a2fecc49589336ebbcbf45cee737d07",
+  "prompts": {},
+  "sessions": {
+    "s_f7459cff2d60da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf10-a645-7962-9072-d97f4d614743",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
