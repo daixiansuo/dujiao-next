@@ -262,6 +262,14 @@ func (s *Service) SendVerifyCode(ctx context.Context, email, purpose, locale, in
 	}
 
 	if purpose == constants.VerifyPurposeTelegramBind {
+		// 公开发信入口也必须遵守 Telegram 开关，不能只在登录或绑定时校验。
+		setting, err := s.settingService.GetTelegramAuthSetting(s.cfg.TelegramAuth)
+		if err != nil {
+			return err
+		}
+		if !setting.Enabled {
+			return telegramauthapp.ErrTelegramAuthDisabled
+		}
 		user, err := s.userRepo.GetByEmail(normalized)
 		if err != nil {
 			return err
@@ -618,9 +626,12 @@ func NormalizeEmail(email string) (string, error) {
 	return normalizeEmail(email)
 }
 
+// isVerifyPurposeSupported 判断公开发信入口（SendVerifyCode）是否接受该用途。
+// change_email_old / change_email_new 不在其中：它们只能由登录态的 SendChangeEmailCode
+// 在校验用户身份、换绑模式和新邮箱占用后发送，公开入口接受会让未登录者向任意邮箱发信。
 func isVerifyPurposeSupported(purpose string) bool {
 	switch strings.ToLower(strings.TrimSpace(purpose)) {
-	case constants.VerifyPurposeRegister, constants.VerifyPurposeReset, constants.VerifyPurposeTelegramBind, constants.VerifyPurposeChangeEmailOld, constants.VerifyPurposeChangeEmailNew:
+	case constants.VerifyPurposeRegister, constants.VerifyPurposeReset, constants.VerifyPurposeTelegramBind:
 		return true
 	default:
 		return false

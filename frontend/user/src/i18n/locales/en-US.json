@@ -198,7 +198,6 @@
     },
     "featured": {
       "title": "Featured Products",
-      "description": "Discover our premium collection of digital assets, curated for excellence.",
       "empty": "No products available",
       "viewAll": "View All Products"
     },
@@ -278,7 +277,6 @@
     "loginToBuy": "Login to buy",
     "addToCart": "Add to cart",
     "buyNow": "Buy now",
-    "categoryLabel": "Category",
     "fulfillmentLabel": "Fulfillment",
     "skuTitle": "Choose SKU",
     "skuRequired": "Please select a SKU before purchase",
@@ -395,6 +393,14 @@
       "recentOrdersTitle": "Recent orders",
       "viewAllOrders": "View all orders",
       "emptyOrders": "No recent orders"
+    },
+    "exclusivePrice": {
+      "title": "My exclusive prices",
+      "hint": "These products have a fixed price set just for you; it applies at checkout when it is lower than the regular and member prices",
+      "unavailable": "Product is off the shelf or unavailable",
+      "total": "{n} in total",
+      "showAll": "Show all ({n})",
+      "collapse": "Collapse"
     },
     "memberLevel": {
       "currentLevel": "Current Level",
@@ -626,6 +632,8 @@
       "rechargeStatus": {
         "pending": "Pending",
         "success": "Credited",
+        "partially_refunded": "Partially Refunded",
+        "refunded": "Refunded",
         "failed": "Failed",
         "expired": "Expired"
       },

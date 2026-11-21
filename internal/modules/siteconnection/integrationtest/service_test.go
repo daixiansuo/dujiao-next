@@ -53,11 +53,17 @@ func TestSiteConnectionServicePingReturnsAdapterCreationError(t *testing.T) {
 }
 
 type fakeMarkupReapplier struct {
-	calls []uint
+	calls      []uint
+	localCalls []uint
 }
 
 func (f *fakeMarkupReapplier) ReapplyMarkup(connectionID uint) (int, error) {
 	f.calls = append(f.calls, connectionID)
+	return 0, nil
+}
+
+func (f *fakeMarkupReapplier) ReapplyMarkupLocal(connectionID uint) (int, error) {
+	f.localCalls = append(f.localCalls, connectionID)
 	return 0, nil
 }
 
@@ -85,8 +91,12 @@ func TestSiteConnectionServiceUpdateTriggersReapplyWhenExchangeRateChanges(t *te
 	if _, err := svc.Update(7, siteconnectionapp.UpdateInput{ExchangeRate: &rate}); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
-	if len(reapplier.calls) != 1 || reapplier.calls[0] != 7 {
-		t.Fatalf("expected reapply called once for conn 7, got %#v", reapplier.calls)
+	// 保存路径必须走不访问上游的本地重算，否则请求可能被拖到分钟级超时。
+	if len(reapplier.localCalls) != 1 || reapplier.localCalls[0] != 7 {
+		t.Fatalf("expected local reapply called once for conn 7, got %#v", reapplier.localCalls)
+	}
+	if len(reapplier.calls) != 0 {
+		t.Fatalf("save must not trigger upstream reapply, got %#v", reapplier.calls)
 	}
 }
 
@@ -102,8 +112,54 @@ func TestSiteConnectionServiceUpdateSkipsReapplyWhenPriceConfigUnchanged(t *test
 	if _, err := svc.Update(7, siteconnectionapp.UpdateInput{Name: name, ExchangeRate: &rate}); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
-	if len(reapplier.calls) != 0 {
-		t.Fatalf("expected no reapply when price config unchanged, got %#v", reapplier.calls)
+	if len(reapplier.calls) != 0 || len(reapplier.localCalls) != 0 {
+		t.Fatalf("expected no reapply when price config unchanged, got remote=%v local=%v", reapplier.calls, reapplier.localCalls)
+	}
+}
+
+func TestSiteConnectionServiceUpdateTriggersReapplyWhenCategoryMarkupsChange(t *testing.T) {
+	repo := &siteConnectionRepoStub{conn: newReapplyTestConn()}
+	svc := siteconnectionapp.NewService(repo, "test-secret-key", t.TempDir())
+	reapplier := &fakeMarkupReapplier{}
+	svc.SetMarkupReapplier(reapplier)
+
+	// 非法键（非数字、0）和负数值会被丢弃，只保留 "5": 30。
+	input := siteconnectionapp.UpdateInput{CategoryMarkups: map[string]float64{"5": 30, "abc": 10, "0": 10, "6": -1}}
+	conn, err := svc.Update(7, input)
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if len(reapplier.localCalls) != 1 || reapplier.localCalls[0] != 7 {
+		t.Fatalf("expected local reapply called once for conn 7, got %#v", reapplier.localCalls)
+	}
+	if len(conn.CategoryMarkups) != 1 || conn.CategoryMarkups["5"] != float64(30) {
+		t.Fatalf("expected only category 5 kept with 30, got %#v", conn.CategoryMarkups)
+	}
+
+	// 再次提交相同配置：没有变化，不应再次重算。
+	if _, err := svc.Update(7, siteconnectionapp.UpdateInput{CategoryMarkups: map[string]float64{"5": 30}}); err != nil {
+		t.Fatalf("second update failed: %v", err)
+	}
+	if len(reapplier.localCalls) != 1 {
+		t.Fatalf("expected no extra reapply for unchanged markups, got %#v", reapplier.localCalls)
+	}
+
+	// 字段未传（nil）不修改已有配置，也不触发重算。
+	conn, err = svc.Update(7, siteconnectionapp.UpdateInput{Name: "renamed"})
+	if err != nil {
+		t.Fatalf("third update failed: %v", err)
+	}
+	if len(reapplier.localCalls) != 1 || len(conn.CategoryMarkups) != 1 {
+		t.Fatalf("omitted category_markups must keep config, calls=%#v markups=%#v", reapplier.localCalls, conn.CategoryMarkups)
+	}
+
+	// 传空对象表示清空，并触发重算。
+	conn, err = svc.Update(7, siteconnectionapp.UpdateInput{CategoryMarkups: map[string]float64{}})
+	if err != nil {
+		t.Fatalf("clear update failed: %v", err)
+	}
+	if len(reapplier.localCalls) != 2 || len(conn.CategoryMarkups) != 0 {
+		t.Fatalf("clearing markups should reapply once more, calls=%#v markups=%#v", reapplier.localCalls, conn.CategoryMarkups)
 	}
 }
 
@@ -200,8 +256,8 @@ func TestConnectionMarkupModeUpdates(t *testing.T) {
 			svc.SetMarkupReapplier(reapplier)
 			got, err := svc.Update(conn.ID, tt.input)
 			if tt.wantInvalid {
-				if !errors.Is(err, siteconnectioncontract.ErrInvalid) || repo.updated || len(reapplier.calls) != 0 {
-					t.Fatalf("invalid input changed state: %v, updated=%v, calls=%v", err, repo.updated, reapplier.calls)
+				if !errors.Is(err, siteconnectioncontract.ErrInvalid) || repo.updated || len(reapplier.calls) != 0 || len(reapplier.localCalls) != 0 {
+					t.Fatalf("invalid input changed state: %v, updated=%v, remote=%v local=%v", err, repo.updated, reapplier.calls, reapplier.localCalls)
 				}
 				return
 			}
@@ -211,8 +267,8 @@ func TestConnectionMarkupModeUpdates(t *testing.T) {
 			if got.PriceMarkupMode != tt.wantMode || got.PriceMarkupAmount.String() != tt.wantAmount || !got.PriceMarkupPercent.Equal(decimal.NewFromFloat(tt.wantPercent)) {
 				t.Fatalf("unexpected pricing: %+v", got)
 			}
-			if (len(reapplier.calls) == 1) != tt.wantReapply {
-				t.Fatalf("reapply calls=%v, want reapply=%v (AutoSyncPrice=false)", reapplier.calls, tt.wantReapply)
+			if len(reapplier.calls) != 0 || (len(reapplier.localCalls) == 1) != tt.wantReapply {
+				t.Fatalf("reapply remote=%v local=%v, want local reapply=%v (AutoSyncPrice=false)", reapplier.calls, reapplier.localCalls, tt.wantReapply)
 			}
 		})
 	}
@@ -305,8 +361,8 @@ func TestSegmentedMarkupUpdates(t *testing.T) {
 			}
 			got, err := svc.Update(conn.ID, input)
 			if tt.invalid {
-				if !errors.Is(err, siteconnectioncontract.ErrInvalid) || repo.updated || len(reapplier.calls) != 0 {
-					t.Fatalf("invalid update saved or repriced: err=%v, updated=%v, calls=%v", err, repo.updated, reapplier.calls)
+				if !errors.Is(err, siteconnectioncontract.ErrInvalid) || repo.updated || len(reapplier.calls) != 0 || len(reapplier.localCalls) != 0 {
+					t.Fatalf("invalid update saved or repriced: err=%v, updated=%v, remote=%v local=%v", err, repo.updated, reapplier.calls, reapplier.localCalls)
 				}
 				if !repo.conn.PriceMarkupThreshold.Equal(before.PriceMarkupThreshold.Decimal) || !repo.conn.PriceMarkupAmount.Equal(before.PriceMarkupAmount.Decimal) || !repo.conn.PriceMarkupPercent.Equal(before.PriceMarkupPercent) || repo.conn.PriceMarkupMode != before.PriceMarkupMode {
 					t.Fatal("invalid input changed persisted pricing")
@@ -319,8 +375,8 @@ func TestSegmentedMarkupUpdates(t *testing.T) {
 			if got.PriceMarkupThreshold.String() != tt.wantThreshold || got.PriceMarkupAmount.String() != tt.wantAmount || got.PriceMarkupPercent.String() != tt.wantPercent {
 				t.Fatalf("unexpected pricing: %+v", got)
 			}
-			if (len(reapplier.calls) == 1) != tt.reapply {
-				t.Fatalf("reapply calls=%v, want=%v", reapplier.calls, tt.reapply)
+			if len(reapplier.calls) != 0 || (len(reapplier.localCalls) == 1) != tt.reapply {
+				t.Fatalf("reapply remote=%v local=%v, want local reapply=%v", reapplier.calls, reapplier.localCalls, tt.reapply)
 			}
 		})
 	}

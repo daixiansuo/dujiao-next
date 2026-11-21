@@ -198,7 +198,6 @@
     },
     "featured": {
       "title": "精选商品",
-      "description": "探索我们精心挑选的优质数字资产系列。",
       "empty": "暂无商品",
       "viewAll": "查看全部商品"
     },
@@ -343,6 +342,14 @@
       "recentOrdersTitle": "最近订单",
       "viewAllOrders": "查看全部订单",
       "emptyOrders": "暂无最近订单"
+    },
+    "exclusivePrice": {
+      "title": "我的专属价",
+      "hint": "以下商品为你单独设置了一口价，下单时若该价格低于原价与会员价，则按此价格结算",
+      "unavailable": "商品已下架或不可用",
+      "total": "共 {n} 条",
+      "showAll": "查看全部（{n}）",
+      "collapse": "收起"
     },
     "memberLevel": {
       "currentLevel": "当前等级",
@@ -574,6 +581,8 @@
       "rechargeStatus": {
         "pending": "待支付",
         "success": "已到账",
+        "partially_refunded": "部分退款",
+        "refunded": "已退款",
         "failed": "支付失败",
         "expired": "支付过期"
       },
@@ -1783,7 +1792,6 @@
     "loginToBuy": "登录后购买",
     "addToCart": "加入购物车",
     "buyNow": "立即购买",
-    "categoryLabel": "分类",
     "fulfillmentLabel": "交付方式",
     "skuTitle": "选择规格",
     "skuRequired": "请选择商品规格后再购买",

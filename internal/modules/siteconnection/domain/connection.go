@@ -3,6 +3,7 @@ package domain
 import (
 	"time"
 
+	"github.com/dujiao-next/internal/shared/jsonmap"
 	"github.com/dujiao-next/internal/shared/money"
 
 	"github.com/shopspring/decimal"
@@ -32,6 +33,7 @@ type Connection struct {
 	CreatedAt            time.Time       `gorm:"index" json:"created_at"`
 	UpdatedAt            time.Time       `gorm:"index" json:"updated_at"`
 	DeletedAt            *time.Time      `gorm:"index" json:"-"`
+	CategoryMarkups      jsonmap.JSON    `gorm:"type:json" json:"category_markups"` // 按上游分类设置的加价百分比 {上游分类ID: 百分比}，未配置的分类回落到 PriceMarkupPercent；子分类继承父分类
 }
 
 // TableName 指定表名

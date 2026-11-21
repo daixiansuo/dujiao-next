@@ -198,7 +198,6 @@
     },
     "featured": {
       "title": "精選商品",
-      "description": "探索我們精心挑選的優質數位資產系列。",
       "empty": "暫無商品",
       "viewAll": "查看全部商品"
     },
@@ -278,7 +277,6 @@
     "loginToBuy": "登入後購買",
     "addToCart": "加入購物車",
     "buyNow": "立即購買",
-    "categoryLabel": "分類",
     "fulfillmentLabel": "交付方式",
     "skuTitle": "選擇規格",
     "skuRequired": "請先選擇商品規格再購買",
@@ -395,6 +393,14 @@
       "recentOrdersTitle": "最近訂單",
       "viewAllOrders": "查看全部訂單",
       "emptyOrders": "暫無最近訂單"
+    },
+    "exclusivePrice": {
+      "title": "我的專屬價",
+      "hint": "以下商品為你單獨設定了一口價，下單時若該價格低於原價與會員價，則按此價格結算",
+      "unavailable": "商品已下架或不可用",
+      "total": "共 {n} 筆",
+      "showAll": "查看全部（{n}）",
+      "collapse": "收起"
     },
     "memberLevel": {
       "currentLevel": "當前等級",
@@ -626,6 +632,8 @@
       "rechargeStatus": {
         "pending": "待支付",
         "success": "已到帳",
+        "partially_refunded": "部分退款",
+        "refunded": "已退款",
         "failed": "支付失敗",
         "expired": "支付逾期"
       },

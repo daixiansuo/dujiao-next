@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dujiao-next/internal/constants"
@@ -193,6 +194,109 @@ func TestMarkupManualAndScheduledSync(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestCategoryMarkupOverridesOnlySegmentedPercentage(t *testing.T) {
+	var categoryUnavailable atomic.Bool
+	source := upstream.UpstreamProduct{
+		ID: 102, CategoryID: 6, Slug: "segmented-category", Title: jsonmap.JSON{"zh-CN": "分段分类"},
+		PriceAmount: "10", IsActive: true,
+		SKUs: []upstream.UpstreamSKU{
+			{ID: 301, SKUCode: "FIXED", PriceAmount: "10", IsActive: true, StockQuantity: 20},
+			{ID: 302, SKUCode: "PERCENT", PriceAmount: "20", IsActive: true, StockQuantity: 20},
+		},
+		WholesalePrices: productdomain.WholesalePriceTiers{
+			{SKUID: 302, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(16))},
+			{SKUID: 302, MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.NewFromInt(14))},
+		},
+	}
+	svc, db, original, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "category-markup.db"), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		unavailable := categoryUnavailable.Load()
+		if strings.HasSuffix(r.URL.Path, "/categories") {
+			if unavailable {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "categories": []upstream.UpstreamCategory{
+				{ID: 5}, {ID: 6, ParentID: 5},
+			}})
+			return
+		}
+		product := source
+		if unavailable {
+			product.SKUs = append([]upstream.UpstreamSKU(nil), source.SKUs...)
+			product.SKUs[0].PriceAmount = "11"
+			product.SKUs[1].PriceAmount, product.SKUs[1].StockQuantity = "24", 8
+			product.WholesalePrices = append(productdomain.WholesalePriceTiers(nil), source.WholesalePrices...)
+			product.WholesalePrices[0].UnitPrice = money.FromDecimal(decimal.NewFromInt(18))
+		}
+		if strings.HasSuffix(r.URL.Path, "/products") {
+			listProductsHandler([]upstream.UpstreamProduct{product}, true)(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": product})
+	})
+	t.Cleanup(cleanup)
+	connSvc := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
+	connSvc.SetMarkupReapplier(svc)
+	mode := constants.ConnectionPriceMarkupSegmented
+	threshold, amount := money.FromDecimal(decimal.NewFromInt(15)), money.FromDecimal(decimal.NewFromInt(5))
+	percent, autoSync := 30.0, true
+	if _, err := connSvc.Update(original.ConnectionID, siteconnectionapp.UpdateInput{
+		PriceMarkupMode: &mode, PriceMarkupThreshold: &threshold, PriceMarkupAmount: &amount,
+		PriceMarkupPercent: &percent, CategoryMarkups: map[string]float64{"5": 40}, AutoSyncPrice: &autoSync,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mapping, err := svc.ImportUpstreamProduct(original.ConnectionID, source.ID, 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPrices := func(fixed, percentage string) {
+		t.Helper()
+		var skus []productdomain.ProductSKU
+		if err := db.Where("product_id = ?", mapping.LocalProductID).Order("id").Find(&skus).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(skus) != 2 || skus[0].PriceAmount.String() != fixed || skus[1].PriceAmount.String() != percentage {
+			t.Fatalf("unexpected SKU prices: %+v; want %s and %s", skus, fixed, percentage)
+		}
+		var product productdomain.Product
+		if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if product.PriceAmount.String() != fixed || len(product.WholesalePrices) != 2 ||
+			product.WholesalePrices[0].UnitPrice.String() != "22.40" || product.WholesalePrices[1].UnitPrice.String() != "19.00" {
+			t.Fatalf("unexpected base price or wholesale ladder: %+v", product)
+		}
+	}
+	assertPrices("15.00", "28.00")
+	if _, err := connSvc.Update(original.ConnectionID, siteconnectionapp.UpdateInput{CategoryMarkups: map[string]float64{"5": 50}}); err != nil {
+		t.Fatal(err)
+	}
+	assertPrices("15.00", "28.00") // Local reapply cannot infer a percentage from an unloaded ancestor.
+	if _, err := svc.ReapplyMarkup(mapping.ConnectionID); err != nil {
+		t.Fatal(err)
+	}
+	assertPrices("15.00", "30.00")
+
+	categoryUnavailable.Store(true)
+	if err := svc.SyncProduct(mapping.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertPrices("16.00", "30.00")
+	if err := svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200); err != nil {
+		t.Fatal(err)
+	}
+	assertPrices("16.00", "30.00")
+	var snapshot mappingdomain.SKUMapping
+	if err := db.Where("product_mapping_id = ? AND upstream_sku_id = ?", mapping.ID, 302).First(&snapshot).Error; err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.UpstreamStock != 8 || snapshot.UpstreamPrice.String() != "24.00" {
+		t.Fatalf("upstream stock and cost snapshot were not refreshed: %+v", snapshot)
 	}
 }
 

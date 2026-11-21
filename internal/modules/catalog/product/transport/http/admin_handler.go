@@ -664,6 +664,12 @@ type BatchProductImagesRequest struct {
 	Images []string `json:"images" binding:"required,min=1,dive,required"`
 }
 
+// BatchProductPurchaseTypeRequest 商品批量购买身份（会员/游客）更新请求
+type BatchProductPurchaseTypeRequest struct {
+	IDs          []uint `json:"ids" binding:"required,min=1"`
+	PurchaseType string `json:"purchase_type" binding:"required"`
+}
+
 type batchProductFailureItem struct {
 	ID        uint   `json:"id"`
 	ErrorCode string `json:"error_code"`
@@ -749,6 +755,21 @@ func (h *AdminProductHandler) BatchUpdateProductImages(c *gin.Context) {
 		}
 	}
 	h.batchQuickUpdate(c, req.IDs, map[string]interface{}{"images": jsonslice.Strings(req.Images)})
+}
+
+// BatchUpdateProductPurchaseType 批量修改购买身份（会员/游客）
+func (h *AdminProductHandler) BatchUpdateProductPurchaseType(c *gin.Context) {
+	var req BatchProductPurchaseTypeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginutil.RespondBindError(c, err)
+		return
+	}
+	purchaseType := productdomain.NormalizePurchaseType(req.PurchaseType)
+	if purchaseType == "" {
+		ginutil.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
+	h.batchQuickUpdate(c, req.IDs, map[string]interface{}{"purchase_type": purchaseType})
 }
 
 // BatchDeleteProducts 批量删除商品

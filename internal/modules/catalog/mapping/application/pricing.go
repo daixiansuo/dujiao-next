@@ -1,9 +1,90 @@
 package application
 
 import (
+	"strconv"
+
 	"github.com/dujiao-next/internal/constants"
+	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
+	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
+	"github.com/dujiao-next/internal/shared/jsonmap"
+
 	"github.com/shopspring/decimal"
 )
+
+// maxCategoryDepth 沿父分类向上查找加价时的最大层数，防止上游分类数据成环导致死循环。
+const maxCategoryDepth = 16
+
+func categoryMarkupEnabled(conn *siteconnectiondomain.Connection) bool {
+	return conn != nil && conn.PriceMarkupMode != constants.ConnectionPriceMarkupFixedAmount && len(conn.CategoryMarkups) > 0
+}
+
+func usesFixedMarkup(converted, threshold decimal.Decimal, mode string) bool {
+	return mode == constants.ConnectionPriceMarkupFixedAmount ||
+		(mode == constants.ConnectionPriceMarkupSegmented && converted.LessThanOrEqual(threshold))
+}
+
+// A missing category percentage only prevents updates to prices that use the percentage tier.
+func canPriceUpstreamAmount(conn *siteconnectiondomain.Connection, upstreamPrice decimal.Decimal, categoryReady bool) bool {
+	return categoryReady || usesFixedMarkup(convertCurrency(upstreamPrice, conn.ExchangeRate), conn.PriceMarkupThreshold.Decimal, conn.PriceMarkupMode)
+}
+
+// Keep the existing wholesale ladder intact if any valid tier cannot be priced safely.
+func canPriceUpstreamWholesale(conn *siteconnectiondomain.Connection, tiers productdomain.WholesalePriceTiers, categoryReady bool) bool {
+	if categoryReady {
+		return true
+	}
+	for _, tier := range tiers {
+		if tier.MinQuantity > 0 && tier.UnitPrice.Decimal.IsPositive() && !canPriceUpstreamAmount(conn, tier.UnitPrice.Decimal, false) {
+			return false
+		}
+	}
+	return true
+}
+
+// parseCategoryMarkup 把 category_markups 里的值转成百分比。
+// 值只有两个来源：normalizeCategoryMarkups 写入前已转成 float64，从库里读回来
+// （JSON 列）同样是 float64。无法解析或为负数时视为未配置。
+func parseCategoryMarkup(raw interface{}) (decimal.Decimal, bool) {
+	value, ok := raw.(float64)
+	if !ok {
+		return decimal.Zero, false
+	}
+	percent := decimal.NewFromFloat(value)
+	if percent.IsNegative() {
+		return decimal.Zero, false
+	}
+	return percent, true
+}
+
+// categoryMarkupsNeedParents 判断按分类算价是否真的需要父分类链。
+// 该分类自己就配了加价时不必向上找，可以省掉一次 ListCategories。
+// 上游分类 ID 为 0（未分类）时也无需继承——ResolveCategoryMarkup 直接返回默认值。
+func categoryMarkupsNeedParents(markups jsonmap.JSON, upstreamCategoryID uint) bool {
+	if len(markups) == 0 || upstreamCategoryID == 0 {
+		return false
+	}
+	_, configured := parseCategoryMarkup(markups[strconv.FormatUint(uint64(upstreamCategoryID), 10)])
+	return !configured
+}
+
+// ResolveCategoryMarkup 返回上游分类应使用的加价百分比。
+// 先取该分类自己的配置；没有则沿父分类向上找（子分类继承父分类）；都没有则用连接默认加价。
+// parents 为「上游分类 ID → 父分类 ID」，可为 nil（此时不继承，只看分类自身）。
+func ResolveCategoryMarkup(defaultPercent decimal.Decimal, markups jsonmap.JSON, upstreamCategoryID uint, parents map[uint]uint) decimal.Decimal {
+	if len(markups) == 0 || upstreamCategoryID == 0 {
+		return defaultPercent
+	}
+	current := upstreamCategoryID
+	for depth := 0; depth < maxCategoryDepth && current != 0; depth++ {
+		if raw, ok := markups[strconv.FormatUint(uint64(current), 10)]; ok {
+			if percent, valid := parseCategoryMarkup(raw); valid {
+				return percent
+			}
+		}
+		current = parents[current]
+	}
+	return defaultPercent
+}
 
 var (
 	hundred    = decimal.NewFromInt(100)
@@ -26,8 +107,7 @@ func convertCurrency(upstreamPrice, exchangeRate decimal.Decimal) decimal.Decima
 // exchangeRate 为 0 或负数时视为 1（同币种）。
 func CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount, markupThreshold decimal.Decimal, markupMode, roundingMode string) decimal.Decimal {
 	converted := convertCurrency(upstreamPrice, exchangeRate)
-	if markupMode == constants.ConnectionPriceMarkupFixedAmount ||
-		(markupMode == constants.ConnectionPriceMarkupSegmented && converted.LessThanOrEqual(markupThreshold)) {
+	if usesFixedMarkup(converted, markupThreshold, markupMode) {
 		if markupAmount.IsZero() {
 			return converted.Round(roundScale)
 		}
