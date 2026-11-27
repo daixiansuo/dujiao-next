@@ -63,26 +63,26 @@
       <span class="truncate">{{ getStockStatusLabel(product) }}</span>
     </span>
 
-    <!-- 价格优惠归入价格区，小屏也保留价签；售罄仍由状态区展示。 -->
-    <div class="flex min-w-0 shrink-0 flex-col items-end tabular-nums">
+    <!-- 横表将优惠价签放在币种与现价前，金额靠右对齐，保持单行紧凑。 -->
+    <div class="flex min-w-0 shrink-0 items-center justify-end gap-1.5 whitespace-nowrap tabular-nums max-md:max-w-[60%]">
       <span
         v-if="price.discounted"
-        class="theme-price-original text-[11px] leading-tight"
+        class="theme-price-original min-w-0 truncate text-[11px] leading-tight"
         :aria-label="t('products.originalPriceAria', { price: formatPrice(product.price_amount, siteCurrency) })"
       >
-        {{ formatPrice(product.price_amount, siteCurrency) }}
-      </span>
-      <span class="flex items-baseline whitespace-nowrap font-mono" :class="price.class" :aria-label="price.aria">
-        <span v-if="siteCurrency" class="mr-1 font-sans text-[11px] font-semibold text-muted-foreground">{{ siteCurrency }}</span>
-        <b class="text-[16px] font-bold leading-none tracking-tight">{{ priceParts.int }}</b>
-        <span v-if="priceParts.dec" class="text-[12px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
+        {{ formatPrice(product.price_amount, '') }}
       </span>
       <span
         v-if="!soldOut && deal"
-        class="mt-1 inline-flex max-w-full items-center rounded-[5px] border px-1.5 py-0.5 text-right text-[10.5px] font-semibold leading-tight whitespace-normal break-words"
+        class="inline-flex h-[20px] shrink-0 items-center rounded-[5px] border px-1.5 text-[10.5px] font-semibold leading-tight"
         :class="deal.chipClass"
       >
         {{ deal.label }}
+      </span>
+      <span class="flex shrink-0 items-baseline whitespace-nowrap font-mono" :class="price.class" :aria-label="price.aria">
+        <span v-if="siteCurrency" class="mr-1 font-sans text-[11px] font-semibold text-muted-foreground">{{ siteCurrency }}</span>
+        <b class="text-[16px] font-bold leading-none tracking-tight">{{ priceParts.int }}</b>
+        <span v-if="priceParts.dec" class="text-[12px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
       </span>
     </div>
 
@@ -199,25 +199,25 @@
     </div>
 
     <!-- 底部：精密分隔线 + 等宽分级价格 + 快捷选购按钮 -->
-    <div class="mt-auto flex items-end justify-between gap-2 border-t pt-3">
-      <div class="flex min-w-0 flex-col tabular-nums">
+    <div class="mt-auto flex items-center justify-between gap-1.5 border-t pt-3">
+      <div class="flex min-w-0 items-center gap-1 whitespace-nowrap tabular-nums">
         <span
           v-if="price.discounted"
-          class="theme-price-original truncate text-[11px] leading-tight"
+          class="theme-price-original min-w-0 truncate text-[11px] leading-tight"
           :aria-label="t('products.originalPriceAria', { price: formatPrice(product.price_amount, siteCurrency) })"
         >
-          {{ formatPrice(product.price_amount, siteCurrency) }}
+          {{ formatPrice(product.price_amount, '') }}
         </span>
-        <span class="flex items-baseline whitespace-nowrap font-mono" :class="price.class" :aria-label="price.aria">
+        <span class="flex shrink-0 items-baseline whitespace-nowrap font-mono" :class="price.class" :aria-label="price.aria">
           <span v-if="siteCurrency" class="mr-1 font-sans text-[11px] font-semibold text-muted-foreground">
             {{ siteCurrency }}
           </span>
-          <b class="text-[19px] font-extrabold leading-none tracking-[-0.03em]">{{ priceParts.int }}</b>
-          <span v-if="priceParts.dec" class="text-[12.5px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
+          <b class="text-[16px] font-extrabold leading-none tracking-[-0.03em]">{{ priceParts.int }}</b>
+          <span v-if="priceParts.dec" class="text-[12px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
         </span>
         <span
           v-if="!soldOut && deal"
-          class="mt-1 inline-flex max-w-full self-start items-center rounded-[5px] border px-1.5 py-0.5 text-[10.5px] font-semibold leading-tight whitespace-normal break-words"
+          class="inline-flex h-[20px] shrink-0 items-center rounded-[5px] border px-1.5 text-[10.5px] font-semibold leading-tight"
           :class="deal.chipClass"
         >
           {{ deal.label }}
@@ -226,7 +226,7 @@
 
       <button
         type="button"
-        class="prism-buy-btn inline-flex h-8 shrink-0 items-center gap-1 rounded-[9px] border bg-secondary px-3 text-xs font-semibold text-foreground transition-all disabled:pointer-events-none disabled:opacity-40"
+        class="prism-buy-btn inline-flex h-8 shrink-0 items-center gap-1 rounded-[9px] border bg-secondary px-2.5 text-xs font-semibold text-foreground transition-all disabled:pointer-events-none disabled:opacity-40"
         :aria-label="t('products.quickBuyAria')"
         :disabled="soldOut"
         @click.stop="$emit('quickBuy', product)"
@@ -241,7 +241,7 @@
 
 <script lang="ts">
 /** 规格横表列宽：商品 | 交付方式 | 库存 | 单价 | 操作。表头与行共用保证严格对齐 */
-export const atelierRowColsClass = 'md:grid md:grid-cols-[minmax(0,1.9fr)_7.25rem_7.5rem_8.25rem_5.5rem]'
+export const atelierRowColsClass = 'md:grid md:grid-cols-[minmax(0,1.9fr)_7.25rem_7.5rem_12.5rem_5.5rem]'
 </script>
 
 <script setup lang="ts">
