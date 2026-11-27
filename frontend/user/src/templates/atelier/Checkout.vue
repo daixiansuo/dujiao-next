@@ -30,11 +30,11 @@
               <div
                 v-for="item in cartItems"
                 :key="cartItemKey(item)"
-                class="flex items-center gap-3.5 py-3 first:pt-1 last:pb-0"
+                class="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-x-3.5 gap-y-2 py-3 first:pt-1 last:pb-0 sm:grid-cols-[8rem_minmax(0,1fr)_auto]"
                 :class="itemStockExceeded(item) && 'rounded-[12px] bg-warning-soft px-3'"
               >
-                <div class="h-14 w-14 shrink-0 overflow-hidden rounded-[12px] border bg-background">
-                  <SmartImage :src="checkoutItemImage(item)" alt="" img-class="h-full w-full object-contain" />
+                <div class="relative row-span-2 aspect-[8/5] w-full self-start overflow-hidden rounded-[10px] sm:row-span-1">
+                  <SmartImage :src="checkoutItemImage(item)" :alt="getLocalizedText(item.title)" img-class="absolute inset-0 h-full w-full object-contain" />
                 </div>
                 <div class="min-w-0 flex-1">
                   <RouterLink
@@ -54,7 +54,7 @@
                     {{ itemStockHint(item) }}
                   </p>
                 </div>
-                <div class="shrink-0 text-right tabular-nums">
+                <div class="col-start-2 min-w-0 text-left tabular-nums sm:col-start-auto sm:text-right">
                   <p
                     class="whitespace-nowrap text-[16px] font-bold leading-none tracking-[-0.02em]"
                     :class="checkoutItemHasPriceDiscount(item) ? 'text-danger' : 'text-foreground'"

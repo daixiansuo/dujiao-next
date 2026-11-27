@@ -78,6 +78,11 @@
     }
   },
   "atelier": {
+    "categoryPrevious": "Browse previous categories",
+    "categoryNext": "Browse more categories",
+    "categoryAll": "All",
+    "categoryAllIn": "View all products in {name}",
+    "coverUnavailable": "Cover unavailable",
     "trustAuto": "24/7 automated instant delivery",
     "autoShort": "Auto Delivery",
     "manualShort": "Manual Delivery",

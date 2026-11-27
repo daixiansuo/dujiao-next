@@ -34,9 +34,9 @@
           <div class="min-w-0 space-y-4 lg:col-span-7 xl:col-span-8">
             <!-- 商品概览头卡 -->
             <section class="prism-card rounded-[16px] bg-card p-5 sm:p-6">
-              <div class="flex flex-col gap-5 sm:flex-row sm:items-start">
-                <!-- 商品缩略/多图展台 -->
-                <div class="w-full shrink-0 sm:w-[196px]">
+              <div class="grid items-center gap-5 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)]">
+                <!-- 卡面与概要并排，限制展台宽度，首屏同时呈现规格和购买摘要。 -->
+                <div class="mx-auto w-full max-w-[280px] sm:max-w-[320px]">
                   <AtelierProductStage
                     :images="images"
                     :current-image="currentImage"

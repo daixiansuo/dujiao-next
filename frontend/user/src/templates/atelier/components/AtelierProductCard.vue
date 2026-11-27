@@ -11,28 +11,6 @@
     @keydown.enter="$emit('click', product.slug)"
   >
     <div class="flex min-w-0 items-center gap-3 max-md:flex-1">
-      <div
-        class="atelier-stage relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[10px]"
-        :class="soldOut && 'grayscale'"
-      >
-        <img
-          v-if="hasImage"
-          :src="displayImageSrc"
-          :alt="title"
-          loading="lazy"
-          decoding="async"
-          class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-          @error="handleImageError"
-        />
-        <span
-          v-else
-          aria-hidden="true"
-          class="text-sm font-extrabold tracking-tight text-[hsl(var(--h)_48%_var(--at-glyph-l))]"
-        >
-          {{ monogram }}
-        </span>
-      </div>
-
       <div class="min-w-0 flex-1">
         <h3 class="flex items-center gap-2 text-sm font-semibold leading-snug text-foreground">
           <span class="line-clamp-2 md:line-clamp-1">{{ title }}</span>
@@ -115,10 +93,10 @@
     </button>
   </article>
 
-  <!-- 方案 B 精密科技卡片模式：横向头像头区 + 真实简介 + 技术规格芯片 + 底部虚线价格与配置选购 -->
+  <!-- 精密卡片保留 atelier 视觉，封面沿用 IDID 横向卡面的完整比例。 -->
   <article
     v-else
-    class="prism-pcard prism-card group relative flex h-full cursor-pointer flex-col rounded-[16px] bg-card p-4.5 text-card-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    class="prism-pcard prism-card group relative flex h-full cursor-pointer flex-col rounded-[14px] bg-card p-3.5 text-card-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     :class="soldOut && 'opacity-60'"
     :style="{ '--h': hue }"
     role="link"
@@ -126,11 +104,11 @@
     @click="$emit('click', product.slug)"
     @keydown.enter="$emit('click', product.slug)"
   >
-    <!-- 顶部横向信息头：左侧 48px 精密展位 + 右侧分类/徽标/标题 -->
-    <div class="flex items-start gap-3.5">
+    <!-- 完整卡面与标题分行，避免横向图片缩成头像后无法辨识。 -->
+    <div class="flex flex-col items-stretch gap-2.5">
       <div
-        class="atelier-stage relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-[12px]"
-        :class="soldOut && 'grayscale'"
+        class="relative mx-auto grid aspect-[8/5] w-full max-w-[280px] shrink-0 place-items-center overflow-hidden rounded-[10px]"
+        :class="[!hasImage && 'atelier-stage', soldOut && 'grayscale']"
       >
         <img
           v-if="hasImage"
@@ -138,17 +116,18 @@
           :alt="title"
           loading="lazy"
           decoding="async"
-          class="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+          class="h-full w-full object-contain"
           @error="handleImageError"
         />
-        <span
+        <div
           v-else
           role="img"
           :aria-label="title"
-          class="select-none text-lg font-extrabold tracking-tight text-[hsl(var(--h)_48%_var(--at-glyph-l))]"
+          class="flex select-none flex-col items-center gap-2 text-muted-foreground/60"
         >
-          {{ monogram }}
-        </span>
+          <ImageIcon class="h-8 w-8" :stroke-width="1.25" aria-hidden="true" />
+          <span class="text-xs">{{ t('atelier.coverUnavailable') }}</span>
+        </div>
       </div>
 
       <div class="min-w-0 flex-1">
@@ -168,19 +147,19 @@
           </span>
         </div>
 
-        <h3 class="mt-1 line-clamp-2 text-[15px] font-bold leading-snug tracking-[-0.015em] text-foreground transition-colors group-hover:text-primary">
+        <h3 class="mt-1 line-clamp-2 text-sm font-bold leading-snug tracking-[-0.015em] text-foreground transition-colors group-hover:text-primary">
           {{ title }}
         </h3>
       </div>
     </div>
 
     <!-- 中段：真实商品简介 -->
-    <p v-if="description" class="mt-3 line-clamp-2 text-[12.5px] leading-relaxed text-muted-foreground">
+    <p v-if="description" class="mt-2 line-clamp-1 text-xs leading-relaxed text-muted-foreground">
       {{ description }}
     </p>
 
     <!-- 真实属性芯片：交付方式 + 实时库存状态 + 商品标签 -->
-    <div class="mb-4 mt-3 flex flex-wrap items-center gap-1.5">
+    <div class="mb-3 mt-2.5 flex flex-wrap items-center gap-1.5">
       <span
         class="inline-flex h-[22px] items-center gap-1.5 rounded-[6px] border px-2 text-[11px] font-semibold"
         :class="product.fulfillment_type === 'auto'
@@ -213,7 +192,7 @@
     </div>
 
     <!-- 底部：精密分隔线 + 等宽分级价格 + 快捷选购按钮 -->
-    <div class="mt-auto flex items-end justify-between gap-2 border-t pt-3.5">
+    <div class="mt-auto flex items-end justify-between gap-2 border-t pt-3">
       <div class="flex min-w-0 flex-col tabular-nums">
         <span
           v-if="price.discounted"
@@ -226,7 +205,7 @@
           <span v-if="siteCurrency" class="mr-1 font-sans text-[11px] font-semibold text-muted-foreground">
             {{ siteCurrency }}
           </span>
-          <b class="text-[21px] font-extrabold leading-none tracking-[-0.03em]">{{ priceParts.int }}</b>
+          <b class="text-[19px] font-extrabold leading-none tracking-[-0.03em]">{{ priceParts.int }}</b>
           <span v-if="priceParts.dec" class="text-[12.5px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
         </span>
       </div>
@@ -239,7 +218,7 @@
         @click.stop="$emit('quickBuy', product)"
         @keydown.enter.stop
       >
-        <span>{{ soldOut ? t('quickBuy.soldOut') : t('productDetail.buyNow') }}</span>
+        <span>{{ soldOut ? t('quickBuy.soldOut') : t('atelier.buyShort') }}</span>
         <ArrowRight v-if="!soldOut" class="h-3 w-3 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
       </button>
     </div>
@@ -254,8 +233,8 @@ export const atelierRowColsClass = 'md:grid md:grid-cols-[minmax(0,1.9fr)_7.25re
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, ShoppingCart } from 'lucide-vue-next'
-import { getFirstImageUrl, getImageUrl, placeholderHue } from '../../../utils/image'
+import { ArrowRight, Image as ImageIcon, ShoppingCart } from 'lucide-vue-next'
+import { getImageUrl, placeholderHue } from '../../../utils/image'
 import { useLocalized, useProductLabels } from '../../../composables/useProduct'
 import { splitPrice } from '../utils/price'
 
@@ -379,22 +358,19 @@ const stock = computed(() => ({
   dot: 'bg-success',
 })
 
-const monogram = computed(() => Array.from(title.value.trim())[0] ?? '')
 const hue = computed(() => placeholderHue(props.product?.id))
 
 const imageErrored = ref(false)
 const attemptIdx = ref(0)
 
 const imageCandidates = computed<string[]>(() => {
-  const arr: string[] = []
-  const primary = getFirstImageUrl(props.product?.images)
-  if (primary) arr.push(primary)
-  const categoryIcon = props.product?.category?.icon
-  if (categoryIcon) {
-    const resolved = getImageUrl(categoryIcon)
-    if (resolved && resolved !== primary) arr.push(resolved)
-  }
-  return arr
+  const images = props.product?.images
+  const covers = Array.isArray(images) ? images : images?.images
+  // 首图失效时继续尝试其余封面，全部失效后才尝试分类图标或展示占位。
+  const paths = [...(Array.isArray(covers) ? covers : []), props.product?.category?.icon]
+  return [...new Set(paths
+    .filter((path): path is string => typeof path === 'string' && Boolean(path.trim()))
+    .map(path => getImageUrl(path.trim())))]
 })
 
 const displayImageSrc = computed(() => imageCandidates.value[attemptIdx.value] ?? '')

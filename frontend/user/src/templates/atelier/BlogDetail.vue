@@ -18,12 +18,22 @@
         </nav>
 
         <div class="atelier-card rounded-[16px] bg-card p-6 md:p-10">
+          <!-- 详情与原定制列表统一封面比例；无图和失效图片不留下空框。 -->
+          <SmartImage
+            v-if="post.thumbnail"
+            :src="getImageUrl(post.thumbnail)"
+            :alt="getLocalizedText(post.title)"
+            img-class="mb-7 aspect-[15/7] w-full rounded-[12px] object-cover"
+            loading="eager"
+          >
+            <template #fallback><span class="hidden" aria-hidden="true"></span></template>
+          </SmartImage>
           <header>
             <div class="flex items-center gap-2.5 text-xs text-muted-foreground">
               <span class="inline-flex h-5.5 items-center rounded-[6px] border bg-background px-2 text-[11px] font-semibold text-foreground/85">
                 {{ post.type === 'blog' ? t('nav.blog') : t('nav.notice') }}
               </span>
-              <time class="font-mono tabular-nums">{{ formatDate(post.published_at) }}</time>
+              <time v-if="post.type === 'notice'" class="font-mono tabular-nums">{{ formatDate(post.published_at) }}</time>
             </div>
             <h1 class="at-post-title mt-4 text-[26px] font-bold md:text-[36px]">
               {{ getLocalizedText(post.title) }}
@@ -32,13 +42,6 @@
               {{ getLocalizedText(post.summary) }}
             </p>
           </header>
-
-          <img
-            v-if="post.thumbnail"
-            :src="getImageUrl(post.thumbnail)"
-            :alt="getLocalizedText(post.title)"
-            class="mt-7 max-h-96 w-full rounded-[16px] border object-contain"
-          />
 
           <div
             v-html="processHtmlForDisplay(getLocalizedText(post.content))"
@@ -89,6 +92,7 @@
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { getImageUrl } from '../../utils/image'
+import SmartImage from '../../components/SmartImage.vue'
 import { processHtmlForDisplay } from '../../utils/content'
 import { Button } from '@/components/ui/button'
 import { useBlogDetail } from '../../composables/useBlogDetail'

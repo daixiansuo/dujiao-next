@@ -1,48 +1,48 @@
 <template>
   <div class="min-h-screen pb-16 pt-[88px] text-foreground">
     <div class="mx-auto w-full max-w-[1240px] px-4 sm:px-6">
-      <div class="mb-7 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b pb-5">
-        <div>
-          <h1 class="text-[26px] font-bold tracking-[-0.025em] md:text-[30px]">{{ t('nav.blog') }}</h1>
-          <p class="mt-1 text-sm text-muted-foreground">{{ t('blog.subtitle') }}</p>
-        </div>
-        <label class="flex h-10 w-full items-center gap-2 rounded-full border bg-card px-3.5 shadow-xs transition-all focus-within:border-hairline-strong focus-within:ring-2 focus-within:ring-primary/20 sm:w-72">
-          <Search class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <section class="mx-auto max-w-[780px] pb-7 pt-4 md:pt-6">
+        <h1 class="sr-only">{{ t('nav.blog') }}</h1>
+        <div class="prism-search-hub mx-auto flex max-w-[640px] items-center gap-2.5 rounded-[16px] px-3.5 py-1.5">
+          <Search class="h-[17px] w-[17px] shrink-0 text-muted-foreground" aria-hidden="true" />
           <input
             v-model="searchKeyword"
-            type="text"
+            type="search"
             :placeholder="t('blog.searchPlaceholder')"
             :aria-label="t('blog.searchPlaceholder')"
-            class="min-w-0 flex-1 border-none bg-transparent text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
+            class="at-search h-10 min-w-0 flex-1 border-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground sm:text-[15px]"
           />
           <button
             v-if="searchKeyword"
             type="button"
-            class="-mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            class="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             :aria-label="t('blog.searchClear')"
             @click="searchKeyword = ''"
           >
-            <X class="h-3.5 w-3.5" />
+            <X class="h-4 w-4" aria-hidden="true" />
           </button>
-        </label>
-      </div>
+        </div>
+      </section>
 
-    <div v-if="categories.length" class="mb-7 flex items-start gap-3">
-      <span class="shrink-0 py-2 text-sm text-muted-foreground">{{ t('blog.categoryLabel') }}</span>
-      <div class="flex min-w-0 flex-wrap gap-2" role="group" :aria-label="t('blog.categoryLabel')">
-        <button
-          v-for="category in [{ id: null, name: null }, ...categories]"
-          :key="category.id ?? 'all'"
-          type="button"
-          class="max-w-full break-words rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          :class="selectedCategory === category.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
-          :aria-pressed="selectedCategory === category.id"
-          @click="changeCategory(category.id)"
+      <div v-if="categories.length" class="mb-7 border-b pb-3">
+        <AtelierCategoryRail
+          :active-key="selectedCategory ?? 'all'"
+          :label="t('blog.categoryLabel')"
         >
-          {{ category.id === null ? t('blog.allCategories') : getLocalizedText(category.name) }}
-        </button>
+          <button
+            v-for="category in [{ id: null, name: null }, ...categories]"
+            :key="category.id ?? 'all'"
+            type="button"
+            class="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+            :class="selectedCategory === category.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
+            :aria-pressed="selectedCategory === category.id"
+            @click="changeCategory(category.id)"
+          >
+            <LayoutGrid v-if="category.id === null" class="h-3.5 w-3.5" aria-hidden="true" />
+            {{ category.id === null ? t('blog.allCategories') : getLocalizedText(category.name) }}
+          </button>
+        </AtelierCategoryRail>
       </div>
-    </div>
 
       <div v-if="loading" class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
         <div v-for="i in 6" :key="i" class="theme-skeleton h-[280px] rounded-[16px]"></div>
@@ -51,43 +51,29 @@
       <div v-else-if="posts.length > 0">
         <div class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
           <article
-            v-for="(post, index) in posts"
+            v-for="post in posts"
             :key="post.id"
-            class="at-post-card atelier-card group flex cursor-pointer flex-col rounded-[16px] bg-card p-2"
-            :class="index === 0 && 'md:col-span-2 md:flex-row md:p-2.5'"
+            class="at-post-card atelier-card group flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-[16px] bg-card"
             @click="goToPost(post.slug)"
           >
-            <div
-              class="atelier-stage flex shrink-0 items-center justify-center overflow-hidden rounded-[14px]"
-              :class="index === 0 ? 'aspect-[15/7] w-full md:w-1/2' : 'aspect-[15/7] w-full'"
-              :style="{ '--h': placeholderHue(post.id) }"
+            <!-- 沿用原定制的 15:7 顶部封面；缺图或加载失败时收起，不额外撑高卡片。 -->
+            <SmartImage
+              v-if="post.thumbnail"
+              :src="getImageUrl(post.thumbnail)"
+              alt=""
+              img-class="aspect-[15/7] w-full shrink-0 object-cover"
             >
-              <img
-                v-if="post.thumbnail"
-                :src="getImageUrl(post.thumbnail)"
-                alt=""
-                loading="lazy"
-                class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-              />
-              <span
-                v-else
-                class="select-none text-6xl font-extrabold tracking-[-0.05em] text-[hsl(var(--h)_42%_var(--at-glyph-l))] opacity-85"
-                aria-hidden="true"
-              >
-                {{ Array.from(getLocalizedText(post.title).trim())[0] }}
-              </span>
-            </div>
+              <template #fallback><span class="hidden" aria-hidden="true"></span></template>
+            </SmartImage>
 
-            <div class="flex flex-1 flex-col p-4" :class="index === 0 && 'md:p-6'">
+            <div class="flex flex-1 flex-col p-[22px]">
               <div class="flex items-center gap-2 text-xs text-muted-foreground">
                 <span class="inline-flex h-5 items-center rounded-[5px] border bg-background px-1.5 text-[11px] font-semibold text-foreground/80">
                   {{ t('nav.blog') }}
                 </span>
-                <time class="font-mono tabular-nums">{{ formatDate(post.published_at) }}</time>
               </div>
               <h2
-                class="mt-2.5 line-clamp-2 font-bold leading-snug tracking-[-0.02em] text-foreground"
-                :class="index === 0 ? 'text-xl md:text-[24px]' : 'text-[16.5px]'"
+                class="mt-2.5 break-words text-lg font-bold leading-snug tracking-[-0.02em] text-foreground"
               >
                 <RouterLink :to="`/blog/${post.slug}`" class="focus-visible:outline-2 focus-visible:outline-primary" @click.stop>
                   {{ getLocalizedText(post.title) }}
@@ -120,8 +106,10 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, BookOpen, Search, X } from 'lucide-vue-next'
-import { getImageUrl, placeholderHue } from '../../utils/image'
+import { ArrowRight, BookOpen, LayoutGrid, Search, X } from 'lucide-vue-next'
+import AtelierCategoryRail from './components/AtelierCategoryRail.vue'
+import { getImageUrl } from '../../utils/image'
+import SmartImage from '../../components/SmartImage.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import PaginationNav from '../../components/PaginationNav.vue'
 import { usePostList } from '../../composables/usePostList'
@@ -131,7 +119,7 @@ const { t } = useI18n()
 const {
   loading, posts, currentPage, totalPages, searchKeyword,
   categories, selectedCategory, changeCategory,
-  getLocalizedText, formatDate, goToPost, changePage,
+  getLocalizedText, goToPost, changePage,
 } = usePostList('blog', { title: () => t('nav.blog'), canonicalPath: '/blog' }, { categoryFilter: true })
 </script>
 

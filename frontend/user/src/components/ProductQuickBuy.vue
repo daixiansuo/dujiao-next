@@ -65,14 +65,14 @@
           <div class="overflow-y-auto overscroll-contain flex-1 px-4 md:px-5 md:pt-4">
             <!-- Product header -->
             <div class="flex gap-3.5 mb-4">
-              <!-- Image -->
+              <!-- 横版卡面沿用商品封面比例，避免方形底板产生大块留白；其他比例完整缩放。 -->
               <div
-                class="w-[90px] h-[90px] md:w-[100px] md:h-[100px] rounded-xl md:rounded-2xl overflow-hidden shrink-0 border cursor-pointer bg-muted"
+                class="relative grid aspect-[8/5] w-24 self-start shrink-0 cursor-pointer place-items-center overflow-hidden rounded-lg md:w-32 md:rounded-xl"
                 @click="goToDetail"
               >
-                <SmartImage :src="productImage" :alt="productTitle" img-class="w-full h-full object-contain">
+                <SmartImage :src="productImage" :alt="productTitle" img-class="absolute inset-0 h-full w-full object-contain" loading="eager">
                   <template #fallback>
-                    <div class="w-full h-full flex items-center justify-center">
+                    <div class="w-full h-full flex items-center justify-center bg-muted">
                       <ImageIcon class="w-7 h-7 text-muted-foreground" :stroke-width="1.5" />
                     </div>
                   </template>

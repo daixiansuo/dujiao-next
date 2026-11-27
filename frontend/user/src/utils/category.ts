@@ -83,6 +83,19 @@ export const getRootCategory = (
   categoryMap: Map<number, PublicCategory>,
 ): PublicCategory => getCategoryAncestors(category, categoryMap)[0] || category
 
+/** 根据唯一选中路径生成逐级筛选行；返回父类后，旧分支的选择和下级行自然清除。 */
+export const buildCategoryFilterRows = (groups: CategoryGroup[], selectedId: number | null) => {
+  const nodes = new Map(flattenCategoryGroups(groups).map(category => [category.id, category]))
+  const selected = selectedId === null ? undefined : nodes.get(selectedId)
+  if (!selected) return []
+
+  const path = [...getCategoryAncestors(selected, nodes), selected]
+  return path.flatMap((category, index) => {
+    const parent = nodes.get(category.id)!
+    return parent.children.length ? [{ parent, selectedId: path[index + 1]?.id ?? null }] : []
+  })
+}
+
 export const buildCategoryPath = (
   category: PublicCategory | undefined,
   categoryMap: Map<number, PublicCategory>,

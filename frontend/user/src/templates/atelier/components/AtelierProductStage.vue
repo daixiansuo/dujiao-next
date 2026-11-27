@@ -1,20 +1,18 @@
 <template>
   <div>
-    <!-- 紧凑精密展台（适配方案 B 头卡，支持多图缩略图切换、触摸滑动与坏图降级） -->
+    <!-- 卡面自带底色与阴影，有图时保持透明；只给缺图占位加底板。 -->
     <div
-      class="atelier-stage relative flex aspect-[8/5] items-center justify-center overflow-hidden rounded-[14px]"
+      class="relative flex aspect-[8/5] items-center justify-center rounded-[14px]"
+      :class="!shownImage && 'atelier-stage'"
       :style="{ '--h': hue }"
       @touchstart.passive="onTouchStart"
       @touchend.passive="onTouchEnd"
     >
       <ProductCardStage v-if="shownImage" :src="currentImage" :alt="productTitle" @image-error="markFailed(currentImage)" />
-      <span
-        v-else
-        class="select-none text-5xl font-extrabold tracking-[-0.04em] text-[hsl(var(--h)_48%_var(--at-glyph-l))] sm:text-6xl"
-        aria-hidden="true"
-      >
-        {{ Array.from(productTitle.trim())[0] }}
-      </span>
+      <div v-else class="flex select-none flex-col items-center gap-2 text-muted-foreground/60" role="img" :aria-label="productTitle">
+        <ImageIcon class="h-8 w-8" :stroke-width="1.25" aria-hidden="true" />
+        <span class="text-xs">{{ t('atelier.coverUnavailable') }}</span>
+      </div>
     </div>
 
     <div v-if="images.length > 1" class="mt-2 flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
@@ -46,6 +44,8 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { Image as ImageIcon } from 'lucide-vue-next'
 import ProductCardStage from '../../../components/product/ProductCardStage.vue'
 import { placeholderHue } from '../../../utils/image'
 
@@ -60,6 +60,7 @@ const emit = defineEmits<{
   'update:currentImage': [value: string]
 }>()
 
+const { t } = useI18n()
 const hue = computed(() => placeholderHue(props.productId))
 const failedSet = reactive(new Set<string>())
 const markFailed = (src: string) => {

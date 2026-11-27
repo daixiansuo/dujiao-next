@@ -78,6 +78,11 @@
     }
   },
   "atelier": {
+    "categoryPrevious": "向左瀏覽分類",
+    "categoryNext": "向右瀏覽分類",
+    "categoryAll": "全部",
+    "categoryAllIn": "查看{name}全部商品",
+    "coverUnavailable": "暫無封面",
     "trustAuto": "7×24h 自動化秒級交付",
     "autoShort": "自動交付",
     "manualShort": "人工交付",

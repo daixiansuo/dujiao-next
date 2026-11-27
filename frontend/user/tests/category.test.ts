@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildCategoryGroups,
+  buildCategoryFilterRows,
   buildCategoryPath,
   createCategoryMap,
   flattenCategoryGroups,
@@ -19,6 +20,25 @@ const categories: PublicCategory[] = [
   { id: 6, parent_id: 0, name: '邮箱', slug: 'email' },
 ]
 const label = (value: unknown) => String(value || '')
+
+test('分类筛选行从选中路径恢复每层选项与全部状态', () => {
+  const groups = buildCategoryGroups(categories)
+  const rows = (selectedId: number | null) => buildCategoryFilterRows(groups, selectedId)
+    .map(row => ({ parent: row.parent.id, selected: row.selectedId, options: row.parent.children.map(child => child.id) }))
+  assert.deepEqual(rows(null), [])
+  assert.deepEqual(rows(99), [])
+  assert.deepEqual(rows(1), [{ parent: 1, selected: null, options: [2, 5] }])
+  assert.deepEqual(rows(3), [
+    { parent: 1, selected: 2, options: [2, 5] },
+    { parent: 2, selected: 3, options: [3, 4] },
+  ])
+  assert.deepEqual(rows(2), [
+    { parent: 1, selected: 2, options: [2, 5] },
+    { parent: 2, selected: null, options: [3, 4] },
+  ])
+  assert.deepEqual(rows(5), [{ parent: 1, selected: 5, options: [2, 5] }])
+  assert.deepEqual(rows(6), [])
+})
 
 test('category tree preserves three levels, sibling order, and existing leaf categories', () => {
   const groups = buildCategoryGroups(categories)

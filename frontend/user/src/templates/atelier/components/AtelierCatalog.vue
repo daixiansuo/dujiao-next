@@ -2,7 +2,7 @@
   <div>
     <div class="mx-auto w-full max-w-[1240px] px-4 sm:px-6">
       <!-- 顶部命令搜索中枢（彻底取消左侧边栏，无虚构数据，全部绑定真实站点配置与分类/搜索接口） -->
-      <section class="mx-auto max-w-[780px] text-center" :class="compactHero ? 'pb-7 pt-2' : 'pb-9 pt-4 md:pt-8'">
+      <section class="mx-auto max-w-[780px] text-center" :class="compactHero ? 'pb-5 pt-2' : 'pb-6 pt-4 md:pt-6'">
         <div
           v-if="!compactHero"
           class="inline-flex items-center gap-2 rounded-full border bg-card/90 px-3 py-1 text-xs font-medium text-muted-foreground shadow-xs"
@@ -51,76 +51,79 @@
             ENTER
           </button>
         </div>
+      </section>
 
-        <!-- 真实一级分类快捷胶囊带 -->
-        <nav
-          v-if="categoryGroups.length > 0"
-          class="mt-4 flex flex-wrap items-center justify-center gap-2"
-          :aria-label="t('products.categoryLabel')"
-        >
+      <!-- 两条单行滑动轨道：一级分类常驻，下级沿当前路径逐层替换，最多占两行。 -->
+      <div v-if="categoryGroups.length" class="mb-4 space-y-1.5 border-b pb-3">
+        <AtelierCategoryRail :active-key="activeGroup?.id ?? 'all'" :label="t('products.categoryLabel')">
           <button
             type="button"
-            class="inline-flex h-8.5 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold transition-all focus-visible:outline-2 focus-visible:outline-primary"
-            :class="selectedCategory === null
-              ? 'border-primary bg-primary text-primary-foreground shadow-xs'
-              : 'bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'"
+            class="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+            :class="selectedCategory === null ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
             :aria-pressed="selectedCategory === null"
             @click="selectCategory(null)"
           >
-            <LayoutGrid class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{{ t('products.allCategories') }}</span>
+            <LayoutGrid class="h-3.5 w-3.5" aria-hidden="true" />
+            {{ t('products.allCategories') }}
           </button>
-
           <button
             v-for="group in categoryGroups"
             :key="group.id"
             type="button"
-            class="inline-flex h-8.5 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold transition-all focus-visible:outline-2 focus-visible:outline-primary"
-            :class="activeGroup?.id === group.id
-              ? 'border-primary bg-primary text-primary-foreground shadow-xs'
-              : 'bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'"
+            class="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+            :class="activeGroup?.id === group.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
             :aria-pressed="activeGroup?.id === group.id"
             @click="selectCategory(group.id)"
           >
-            <img
-              v-if="group.icon"
-              :src="getImageUrl(group.icon)"
-              alt=""
-              loading="lazy"
-              class="h-4 w-4 shrink-0 rounded-full object-cover"
-            />
-            <span class="max-w-[10rem] truncate">{{ getLocalizedText(group.name) }}</span>
+            <img v-if="group.icon" :src="getImageUrl(group.icon)" alt="" loading="lazy" class="h-4 w-4 shrink-0 rounded-full object-cover" />
+            {{ getLocalizedText(group.name) }}
           </button>
-        </nav>
+        </AtelierCategoryRail>
 
-        <!-- 若当前选中的一级分类包含真实二级子分类，在下方展开一行精准筛选条 -->
-        <div
-          v-if="activeGroup && activeGroup.children.length > 0"
-          class="mt-2.5 flex flex-wrap items-center justify-center gap-1.5"
-        >
+        <div v-if="activeCategoryRow" class="flex min-w-0 items-center gap-2">
           <button
+            v-if="backCategory"
             type="button"
-            class="inline-flex h-7 max-w-[14rem] items-center rounded-lg border px-2.5 text-[11.5px] font-semibold transition-colors"
-            :class="selectedCategory === activeGroup.id
-              ? 'border-primary/50 bg-primary/10 text-primary'
-              : 'bg-card/70 text-muted-foreground hover:text-foreground'"
-            @click="selectCategory(activeGroup.id)"
+            class="inline-flex h-8 max-w-28 shrink-0 items-center gap-1 rounded-lg border-r px-2 text-xs text-muted-foreground transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+            :aria-label="t('breadcrumb.back', { name: getLocalizedText(backCategory.name) })"
+            @click="selectCategory(backCategory.id)"
           >
-            <span class="truncate">{{ getLocalizedText(activeGroup.name) }}</span>
+            <ChevronLeft class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span class="truncate">{{ getLocalizedText(backCategory.name) }}</span>
           </button>
-          <CategoryTree
-            class="w-full max-w-xl text-left"
-            :categories="activeGroup.children"
-            :selected-category="selectedCategory"
-            :expanded-parent-ids="expandedParentIds"
-            compact
-            @select="selectCategory"
-            @toggle="toggleParentCategory"
-          />
+          <AtelierCategoryRail
+            :key="activeCategoryRow.parent.id"
+            class="min-w-0 flex-1"
+            :active-key="activeCategoryRow.selectedId ?? activeCategoryRow.parent.id"
+            :label="getLocalizedText(activeCategoryRow.parent.name)"
+          >
+            <button
+              type="button"
+              class="inline-flex h-8 shrink-0 items-center whitespace-nowrap rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+              :class="activeCategoryRow.selectedId === null ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
+              :aria-pressed="activeCategoryRow.selectedId === null"
+              :aria-label="t('atelier.categoryAllIn', { name: getLocalizedText(activeCategoryRow.parent.name) })"
+              @click="selectCategory(activeCategoryRow.parent.id)"
+            >
+              {{ t('atelier.categoryAll') }} · {{ getLocalizedText(activeCategoryRow.parent.name) }}
+            </button>
+            <button
+              v-for="category in activeCategoryRow.parent.children"
+              :key="category.id"
+              type="button"
+              class="inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+              :class="activeCategoryRow.selectedId === category.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'"
+              :aria-pressed="activeCategoryRow.selectedId === category.id"
+              @click="selectCategory(category.id)"
+            >
+              {{ getLocalizedText(category.name) }}
+              <ChevronRight v-if="category.children.length" class="h-3 w-3 shrink-0" aria-hidden="true" />
+            </button>
+          </AtelierCategoryRail>
         </div>
-      </section>
+      </div>
 
-      <!-- 插槽：首页在此插入 12 列不对称 Bento 精选展位（真实 Banner + 真实公告/文章） -->
+      <!-- 首页按配置插入 Banner。 -->
       <slot name="showcase" />
 
       <!-- 实时商品货架顶栏：分类标题 + 接口总数 + 精密卡片/规格横表视图切换 -->
@@ -171,19 +174,15 @@
             <div class="ml-auto h-5 w-20 rounded theme-skeleton"></div>
           </div>
         </template>
-        <div v-for="i in 6" v-else :key="i" class="prism-card rounded-[16px] bg-card p-4.5">
-          <div class="flex items-start gap-3.5">
-            <div class="h-12 w-12 shrink-0 rounded-[12px] theme-skeleton"></div>
-            <div class="min-w-0 flex-1 space-y-2">
-              <div class="h-3 w-20 rounded theme-skeleton"></div>
-              <div class="h-4 w-4/5 rounded theme-skeleton"></div>
-            </div>
-          </div>
-          <div class="mt-3.5 h-3.5 w-full rounded theme-skeleton"></div>
-          <div class="mt-2 h-3.5 w-2/3 rounded theme-skeleton"></div>
-          <div class="mt-5 flex items-center justify-between border-t pt-3.5">
-            <div class="h-6 w-20 rounded theme-skeleton"></div>
-            <div class="h-8 w-20 rounded-[9px] theme-skeleton"></div>
+        <div v-for="i in 8" v-else :key="i" class="prism-card rounded-[14px] bg-card p-3.5">
+          <div class="mx-auto aspect-[8/5] w-full max-w-[280px] rounded-[10px] theme-skeleton"></div>
+          <div class="mt-3 h-3 w-20 rounded theme-skeleton"></div>
+          <div class="mt-2 h-4 w-4/5 rounded theme-skeleton"></div>
+          <div class="mt-2 h-3 w-full rounded theme-skeleton"></div>
+          <div class="mt-3 h-5 w-32 rounded theme-skeleton"></div>
+          <div class="mt-3 flex items-center justify-between border-t pt-3">
+            <div class="h-5 w-20 rounded theme-skeleton"></div>
+            <div class="h-8 w-16 rounded-[8px] theme-skeleton"></div>
           </div>
         </div>
       </div>
@@ -305,7 +304,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, LayoutGrid, List, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, LayoutGrid, List, Search, X } from 'lucide-vue-next'
 import { getImageUrl, placeholderHue } from '../../../utils/image'
 import { useLocalized } from '../../../composables/useProduct'
 import { useProductList } from '../../../composables/useProductList'
@@ -315,9 +314,9 @@ import AtelierProductCard, { atelierRowColsClass } from './AtelierProductCard.vu
 import ProductQuickBuy from '../../../components/ProductQuickBuy.vue'
 import PaginationNav from '../../../components/PaginationNav.vue'
 import EmptyState from '../../../components/EmptyState.vue'
-import CategoryTree from '../../../components/CategoryTree.vue'
-import { getRootCategory } from '../../../utils/category'
+import { buildCategoryFilterRows, getRootCategory } from '../../../utils/category'
 import { Button } from '@/components/ui/button'
+import AtelierCategoryRail from './AtelierCategoryRail.vue'
 
 const props = withDefaults(defineProps<{
   homeRouteName?: string
@@ -357,8 +356,6 @@ const {
   total,
   categoryGroups,
   categoryMap,
-  expandedParentIds,
-  toggleParentCategory,
   selectCategory,
   changePage,
   clearSearch,
@@ -372,6 +369,10 @@ const {
 })
 
 const groups = useProductListGroups(products, categoryMap)
+const categoryFilterRows = computed(() => buildCategoryFilterRows(categoryGroups.value, selectedCategory.value))
+// 只展示最深一层的同级选项；返回上级后恢复该层，筛选与 URL 仍由 useProductList 统一管理。
+const activeCategoryRow = computed(() => categoryFilterRows.value[categoryFilterRows.value.length - 1])
+const backCategory = computed(() => categoryFilterRows.value[categoryFilterRows.value.length - 2]?.parent)
 const displayTotal = computed(() => total.value || products.value.length)
 
 // 初始视图跟随后台配置的 template_mode，同时允许用户自由切换精密卡片 / 规格横表
@@ -381,7 +382,7 @@ watch(() => props.layout, (val) => {
 })
 const isTableView = computed(() => viewMode.value === 'list')
 
-const gridClass = 'grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3'
+const gridClass = 'grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
 
 const heroHeadline = computed(() => {
   if (props.heading) return props.heading

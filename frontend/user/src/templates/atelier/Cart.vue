@@ -34,19 +34,20 @@
             <article
               v-for="item in cartItems"
               :key="cartItemKey(item)"
-              class="flex gap-3.5 p-4 transition-colors hover:bg-background/60 sm:gap-5 sm:p-5"
+              class="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3.5 gap-y-3 p-4 transition-colors hover:bg-background/60 sm:flex sm:gap-5 sm:p-5"
             >
               <RouterLink
                 :to="`/products/${item.slug}`"
-                class="h-20 w-20 shrink-0 overflow-hidden rounded-[14px] border bg-background sm:h-24 sm:w-24"
+                class="relative aspect-[8/5] w-24 shrink-0 self-start overflow-hidden rounded-[10px] sm:w-36"
                 tabindex="-1"
                 aria-hidden="true"
               >
-                <SmartImage :src="cartItemImage(item)" alt="" img-class="h-full w-full object-contain" />
+                <SmartImage :src="cartItemImage(item)" alt="" img-class="absolute inset-0 h-full w-full object-contain" />
               </RouterLink>
 
-              <div class="flex min-w-0 flex-1 flex-col">
-                <div class="flex items-start justify-between gap-3">
+              <!-- 手机端让操作和金额独占整行，避免横版封面挤窄右侧控件。 -->
+              <div class="contents sm:flex sm:min-w-0 sm:flex-1 sm:flex-col">
+                <div class="flex min-w-0 items-start justify-between gap-1.5 sm:gap-3">
                   <div class="min-w-0 flex-1">
                     <RouterLink
                       :to="`/products/${item.slug}`"
@@ -83,7 +84,7 @@
                   </button>
                 </div>
 
-                <div class="mt-auto flex flex-wrap items-end justify-between gap-3 pt-4">
+                <div class="col-span-2 flex min-w-0 flex-wrap items-end justify-between gap-3 sm:mt-auto sm:pt-4">
                   <div class="inline-flex items-center gap-1 rounded-[10px] border bg-secondary p-1">
                     <button
                       type="button"
@@ -126,7 +127,7 @@
 
                 <p
                   v-if="quantityWarning(item)"
-                  class="mt-3 rounded-[10px] bg-warning-soft px-3 py-2 text-xs font-medium text-warning"
+                  class="col-span-2 rounded-[10px] bg-warning-soft px-3 py-2 text-xs font-medium text-warning sm:mt-3"
                 >
                   {{ quantityWarning(item) }}
                 </p>
