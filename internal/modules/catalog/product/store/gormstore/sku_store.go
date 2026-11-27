@@ -158,3 +158,24 @@ func (r *SKUStore) ReleaseManualStock(skuID uint, quantity int) (int64, error) {
 func (r *SKUStore) ConsumeManualStock(skuID uint, quantity int) (int64, error) {
 	return gormutil.ConsumeManualStock(r.db, &productdomain.ProductSKU{}, skuID, quantity)
 }
+
+// SetInactive 只写停售字段，避免持有旧规格快照时覆盖运营调整或价格同步。
+func (r *SKUStore) SetInactive(id uint) error {
+	return r.db.Model(&productdomain.ProductSKU{}).Where("id = ? AND deleted_at IS NULL", id).
+		Update("is_active", false).Error
+}
+
+// UpdateSyncFields 同步规格与可选价格，绝不回写旧快照中的启用状态。
+func (r *SKUStore) UpdateSyncFields(item *productdomain.ProductSKU, applyPrice bool) error {
+	if item == nil {
+		return errors.New("sku is nil")
+	}
+	updates := map[string]interface{}{"spec_values_json": item.SpecValuesJSON}
+	if applyPrice {
+		updates["price_amount"] = item.PriceAmount
+		updates["cost_price_amount"] = item.CostPriceAmount
+	}
+	return r.db.Model(&productdomain.ProductSKU{}).
+		Where("id = ? AND deleted_at IS NULL", item.ID).
+		Updates(updates).Error
+}

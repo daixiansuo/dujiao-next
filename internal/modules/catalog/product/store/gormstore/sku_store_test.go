@@ -171,3 +171,35 @@ func TestSKUStoreDeleteByProductHidesRowsAndRejectsStockMutations(t *testing.T) 
 		}
 	}
 }
+
+func TestSKUSyncFieldsPreserveStopAndOptionalPrice(t *testing.T) {
+	for _, applyPrice := range []bool{false, true} {
+		t.Run(fmt.Sprint(applyPrice), func(t *testing.T) {
+			store, _ := setupSKUStoreTest(t)
+			item := &productdomain.ProductSKU{ProductID: 1, SKUCode: "SYNC", PriceAmount: money.FromDecimal(decimal.NewFromInt(10)), CostPriceAmount: money.FromDecimal(decimal.NewFromInt(5)), IsActive: true}
+			if err := store.Create(item); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetInactive(item.ID); err != nil {
+				t.Fatal(err)
+			}
+			item.SpecValuesJSON = jsonmap.JSON{"version": "new"}
+			item.PriceAmount = money.FromDecimal(decimal.NewFromInt(20))
+			item.CostPriceAmount = money.FromDecimal(decimal.NewFromInt(8))
+			if err := store.UpdateSyncFields(item, applyPrice); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.GetByID(item.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantPrice, wantCost := money.FromDecimal(decimal.NewFromInt(10)), money.FromDecimal(decimal.NewFromInt(5))
+			if applyPrice {
+				wantPrice, wantCost = item.PriceAmount, item.CostPriceAmount
+			}
+			if got.IsActive || got.SpecValuesJSON["version"] != "new" || !got.PriceAmount.Equal(wantPrice.Decimal) || !got.CostPriceAmount.Equal(wantCost.Decimal) {
+				t.Fatalf("sync fields changed stop or unexpected price: %+v", got)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package orderhttp
 import (
 	"context"
 	"errors"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 
 	paymentpresenter "github.com/dujiao-next/internal/modules/payment/transport/presenter"
 
@@ -284,7 +285,7 @@ func (h *CreateHandler) respondCreateAndPay(c *gin.Context, order *orderdomain.O
 		response.Success(c, gin.H{
 			"order":         orderResp,
 			"order_no":      order.OrderNo,
-			"payment_error": err.Error(),
+			"payment_error": orderPaymentErrorMessage(c, err),
 		})
 		return
 	}
@@ -320,4 +321,18 @@ func (h *CreateHandler) respondCreateAndPay(c *gin.Context, order *orderdomain.O
 		resp["expires_at"] = result.Payment.ExpiredAt
 	}
 	response.Success(c, resp)
+}
+
+// orderPaymentErrorMessage 创建订单后支付失败也使用安全、可翻译的业务提示。
+func orderPaymentErrorMessage(c *gin.Context, err error) string {
+	key := "error.payment_create_failed"
+	switch {
+	case errors.Is(err, mappingcontract.ErrUpstreamStockInsufficient):
+		key = "error.upstream_stock_insufficient"
+	case errors.Is(err, mappingcontract.ErrUpstreamCheckFailed):
+		key = "error.upstream_check_failed"
+	case errors.Is(err, mappingcontract.ErrUpstreamProductNotFound), errors.Is(err, mappingcontract.ErrMappingNotFound), errors.Is(err, mappingcontract.ErrMappingInactive):
+		key = "error.product_not_available"
+	}
+	return i18n.T(i18n.ResolveLocale(c), key)
 }

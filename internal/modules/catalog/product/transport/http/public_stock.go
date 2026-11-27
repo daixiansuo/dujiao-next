@@ -104,13 +104,21 @@ func (h *PublicHandler) decorateProductStock(product *productdomain.Product, ite
 
 // decorateUpstreamStock 根据 SKU 映射的上游库存信息填充商品及 SKU 级库存状态
 func (h *PublicHandler) decorateUpstreamStock(product *productdomain.Product, item *publicProductView) {
+	// 先清空展示缓存；映射缺失或查询失败不能降级成“有货”的手工商品。
+	item.StockStatus = constants.ProductStockStatusOutOfStock
+	item.IsSoldOut = true
+	for i := range item.Product.SKUs {
+		item.Product.SKUs[i].UpstreamStock = 0
+		item.Product.SKUs[i].AutoStockAvailable = 0
+		item.Product.SKUs[i].ManualStockTotal = 0
+	}
+	if !product.IsActive || h.mappings == nil || h.skuMappings == nil {
+		return
+	}
 	// 通过本地商品 ID 查找 product mapping
 	mapping, err := h.mappings.GetByLocalProductID(product.ID)
-	if err != nil || mapping == nil {
-		// 没有映射记录，降级为显示有库存（避免误售罄）
-		item.Product.FulfillmentType = constants.FulfillmentTypeManual
-		item.StockStatus = constants.ProductStockStatusInStock
-		item.IsSoldOut = false
+	if err != nil || mapping == nil || !mapping.IsActive ||
+		mapping.UpstreamStatus == mappingdomain.UpstreamStatusInactive || mapping.UpstreamStatus == mappingdomain.UpstreamStatusDeleted {
 		return
 	}
 
@@ -124,8 +132,6 @@ func (h *PublicHandler) decorateUpstreamStock(product *productdomain.Product, it
 	// 获取该映射下的所有 SKU 映射
 	skuMappings, err := h.skuMappings.ListByProductMapping(mapping.ID)
 	if err != nil || len(skuMappings) == 0 {
-		item.StockStatus = constants.ProductStockStatusInStock
-		item.IsSoldOut = false
 		return
 	}
 
@@ -143,7 +149,7 @@ func (h *PublicHandler) decorateUpstreamStock(product *productdomain.Product, it
 	for i := range item.Product.SKUs {
 		sku := &item.Product.SKUs[i]
 		sm, ok := skuMappingByLocal[sku.ID]
-		if !ok || !sm.UpstreamIsActive {
+		if !sku.IsActive || !ok || sm.ProductMappingID != mapping.ID || !sm.UpstreamIsActive || sm.UpstreamStock < -1 {
 			sku.UpstreamStock = 0
 			continue
 		}

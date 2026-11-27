@@ -83,6 +83,11 @@ func (s *PaymentService) CreatePayment(input CreatePaymentInput) (*CreatePayment
 		}
 	}
 
+	// 在扣款、复用支付链接和网关请求之前核验，外部请求不得进入数据库事务。
+	if err := s.checkUpstreamPayment(input); err != nil {
+		return nil, err
+	}
+
 	err := s.paymentRepo.WithinTransaction(func(tx paymentcontract.Transaction) error {
 		preloaded, err := tx.Orders().GetByIDForUpdateWithChildren(input.OrderID)
 		if err != nil {
@@ -100,6 +105,9 @@ func (s *PaymentService) CreatePayment(input CreatePaymentInput) (*CreatePayment
 		}
 		if lockedOrder.ExpiresAt != nil && !lockedOrder.ExpiresAt.After(time.Now()) {
 			return orderapp.ErrOrderStatusInvalid
+		}
+		if err := validateUpstreamPaymentInTx(&lockedOrder, tx); err != nil {
+			return err
 		}
 
 		paymentRepo := tx.Payments()

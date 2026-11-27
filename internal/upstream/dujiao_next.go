@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
@@ -123,7 +125,7 @@ func (e *upstreamHTTPError) Error() string {
 	if e.Code != "" {
 		return fmt.Sprintf("upstream responded with status %d (%s): %s", e.Status, e.Code, e.Message)
 	}
-	return fmt.Sprintf("upstream responded with status %d: %s", e.Status, e.Body)
+	return fmt.Sprintf("upstream responded with status %d", e.Status)
 }
 
 // extractUpstreamErrorCode 从错误链中提取 upstreamHTTPError.Code
@@ -198,34 +200,124 @@ func (a *DujiaoNextAdapter) ListProducts(ctx context.Context, opts ListProductsO
 	if opts.IncludeInactive {
 		path += "&include_inactive=true"
 	}
-	var result ProductListResult
+	var result struct {
+		OK               bool               `json:"ok"`
+		Total            *int               `json:"total"`
+		Items            *[]json.RawMessage `json:"items"`
+		Page             int                `json:"page"`
+		PageSize         int                `json:"page_size"`
+		IncludesInactive bool               `json:"includes_inactive"`
+	}
 	if err := a.doRequest(ctx, http.MethodGet, path, nil, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	if !result.OK || result.Total == nil || *result.Total < 0 || result.Items == nil || result.Page < 0 || result.PageSize < 0 {
+		return nil, fmt.Errorf("%w: invalid product list envelope", ErrUpstreamInvalidResponse)
+	}
+	if (result.Page > 0 && result.Page != opts.Page) || (result.PageSize > 0 && len(*result.Items) > result.PageSize) || len(*result.Items) > *result.Total {
+		return nil, fmt.Errorf("%w: inconsistent product list pagination", ErrUpstreamInvalidResponse)
+	}
+	products := make([]UpstreamProduct, 0, len(*result.Items))
+	seen := make(map[uint]struct{}, len(*result.Items))
+	for _, raw := range *result.Items {
+		product, err := decodeUpstreamProduct(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[product.ID]; exists {
+			return nil, fmt.Errorf("%w: duplicate product_id=%d", ErrUpstreamInvalidResponse, product.ID)
+		}
+		seen[product.ID] = struct{}{}
+		products = append(products, *product)
+	}
+	return &ProductListResult{
+		Total: *result.Total, Items: products, Page: result.Page, PageSize: result.PageSize,
+		IncludesInactive: result.IncludesInactive,
+	}, nil
 }
 
-// GetProduct 获取单个商品详情
-// 上游已删除（软删）→ 返回 ErrUpstreamProductDeleted
-// 旧版上游对下架商品也返回 404 product_unavailable → 返回 ErrUpstreamProductUnavailable
-// 新版上游下架商品改为 200 + is_active=false，调用方应根据 IsActive 字段判断
+// GetProduct 获取单个商品详情。无法区分删除与下架的 404 统一表示当前不可售，
+// 只有明确的 product_deleted 才表示删除；连接、鉴权和限流错误不能触发停售。
 func (a *DujiaoNextAdapter) GetProduct(ctx context.Context, productID uint) (*UpstreamProduct, error) {
 	path := fmt.Sprintf("/api/v1/upstream/products/%d", productID)
 	var result struct {
 		OK      bool            `json:"ok"`
-		Product UpstreamProduct `json:"product"`
+		Product json.RawMessage `json:"product"`
 	}
 	if err := a.doRequest(ctx, http.MethodGet, path, nil, &result); err != nil {
-		// 解析上游返回的 error_code 归一化为哨兵错误
-		switch extractUpstreamErrorCode(err) {
-		case "product_deleted", "product_not_found":
+		var responseErr *upstreamHTTPError
+		if !errors.As(err, &responseErr) || responseErr.Status >= 500 || responseErr.Status == http.StatusUnauthorized || responseErr.Status == http.StatusForbidden || responseErr.Status == http.StatusTooManyRequests {
+			return nil, err
+		}
+		switch responseErr.Code {
+		case "product_deleted":
 			return nil, ErrUpstreamProductDeleted
-		case "product_unavailable":
+		case "product_not_found", "product_unavailable":
 			return nil, ErrUpstreamProductUnavailable
+		case "":
+			// TGHAO 等旧上游返回 HTML 404；仅商品详情接口采用这个兼容规则。
+			if responseErr.Status == http.StatusNotFound {
+				return nil, ErrUpstreamProductUnavailable
+			}
 		}
 		return nil, err
 	}
-	return &result.Product, nil
+	if !result.OK {
+		return nil, fmt.Errorf("%w: product detail ok=false", ErrUpstreamInvalidResponse)
+	}
+	product, err := decodeUpstreamProduct(result.Product)
+	if err != nil {
+		return nil, err
+	}
+	if product.ID != productID {
+		return nil, fmt.Errorf("%w: product detail id mismatch", ErrUpstreamInvalidResponse)
+	}
+	return product, nil
+}
+
+// decodeUpstreamProduct 校验同步所依赖的最少字段。缺失不能被 Go 零值解释为
+// 下架、零库存或全部 SKU 删除；显式空数组才表示上游确实没有规格。
+func decodeUpstreamProduct(raw json.RawMessage) (*UpstreamProduct, error) {
+	var fields struct {
+		ID       *uint              `json:"id"`
+		IsActive *bool              `json:"is_active"`
+		SKUs     *[]json.RawMessage `json:"skus"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("%w: decode product: %v", ErrUpstreamInvalidResponse, err)
+	}
+	if fields.ID == nil || *fields.ID == 0 || fields.IsActive == nil || (*fields.IsActive && fields.SKUs == nil) {
+		return nil, fmt.Errorf("%w: missing product availability fields", ErrUpstreamInvalidResponse)
+	}
+	var product UpstreamProduct
+	if err := json.Unmarshal(raw, &product); err != nil {
+		return nil, fmt.Errorf("%w: decode product fields: %v", ErrUpstreamInvalidResponse, err)
+	}
+	// 商品已明确下架时不依赖其规格库存是否完整，调用方会统一停售整个商品。
+	if !product.IsActive {
+		return &product, nil
+	}
+	if fields.SKUs != nil {
+		seen := make(map[uint]struct{}, len(*fields.SKUs))
+		for _, rawSKU := range *fields.SKUs {
+			var sku struct {
+				ID            *uint `json:"id"`
+				IsActive      *bool `json:"is_active"`
+				StockQuantity *int  `json:"stock_quantity"`
+			}
+			if err := json.Unmarshal(rawSKU, &sku); err != nil {
+				return nil, fmt.Errorf("%w: decode SKU: %v", ErrUpstreamInvalidResponse, err)
+			}
+			if sku.ID == nil || *sku.ID == 0 || sku.IsActive == nil || sku.StockQuantity == nil || *sku.StockQuantity < -1 {
+				return nil, fmt.Errorf("%w: invalid SKU availability fields", ErrUpstreamInvalidResponse)
+			}
+			if _, exists := seen[*sku.ID]; exists {
+				return nil, fmt.Errorf("%w: duplicate sku_id=%d", ErrUpstreamInvalidResponse, *sku.ID)
+			}
+			seen[*sku.ID] = struct{}{}
+		}
+	}
+	return &product, nil
 }
 
 // CreateOrder 发起采购单
@@ -397,11 +489,17 @@ func (a *DujiaoNextAdapter) doRequest(ctx context.Context, method, path string, 
 
 		resp, err := a.client.Do(req)
 		if err != nil {
+			if retryUpstreamRead(ctx, method, path, attempt, err) {
+				continue
+			}
 			return fmt.Errorf("send request: %w", err)
 		}
 		respBody, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if readErr != nil {
+			if retryUpstreamRead(ctx, method, path, attempt, readErr) {
+				continue
+			}
 			return fmt.Errorf("read response: %w", readErr)
 		}
 
@@ -414,9 +512,10 @@ func (a *DujiaoNextAdapter) doRequest(ctx context.Context, method, path string, 
 			return nil
 		}
 
+		responseErr := newUpstreamHTTPError(resp.StatusCode, respBody)
 		logger.Warnw("upstream_request_error",
 			"method", method, "path", path,
-			"status", resp.StatusCode, "attempt", attempt, "body", string(respBody))
+			"status", resp.StatusCode, "attempt", attempt, "error_code", extractUpstreamErrorCode(responseErr))
 
 		if attempt < maxRequestAttempts && shouldRetryUpstream(resp.StatusCode, method) {
 			wait := upstreamRetryWait(resp, attempt)
@@ -434,6 +533,29 @@ func (a *DujiaoNextAdapter) doRequest(ctx context.Context, method, path string, 
 
 		return newUpstreamHTTPError(resp.StatusCode, respBody)
 	}
+}
+
+// retryUpstreamRead 仅对幂等读取的暂态传输错误重试。采购 POST 的网络超时
+// 可能发生在上游已扣款之后，不能套用读取重试；调用方的总期限也不能被重试延长。
+func retryUpstreamRead(ctx context.Context, method, path string, attempt int, err error) bool {
+	if attempt >= maxRequestAttempts || (method != http.MethodGet && method != http.MethodHead) || ctx.Err() != nil {
+		return false
+	}
+	var networkErr net.Error
+	transient := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE)
+	if errors.As(err, &networkErr) {
+		transient = transient || networkErr.Timeout() || networkErr.Temporary()
+	}
+	if !transient {
+		return false
+	}
+	wait := time.Duration(attempt) * time.Second
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= wait {
+		return false
+	}
+	logger.Warnw("upstream_read_retry", "method", method, "path", path, "attempt", attempt, "error", err)
+	return sleepCtx(ctx, wait) == nil
 }
 
 func newUpstreamHTTPError(status int, respBody []byte) error {

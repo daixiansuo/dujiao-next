@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"context"
 	"time"
 
 	procurementdomain "github.com/dujiao-next/internal/modules/procurement/domain"
@@ -60,4 +61,10 @@ type BotFulfillmentNotifier interface {
 
 type FailureNotifier interface {
 	NotifyFailure(order *procurementdomain.Order, message string) error
+}
+
+// UnavailabilityReporter 将上游明确的商品/规格拒绝同步到本地可售状态。
+// 库存不足只清零对应 SKU 库存；停售判断由 Catalog Mapping 统一处理。
+type UnavailabilityReporter interface {
+	ReportUpstreamUnavailable(ctx context.Context, localProductID, localSKUID uint, code string) error
 }

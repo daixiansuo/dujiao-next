@@ -1,6 +1,7 @@
 package paymentbootstrap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -48,10 +49,19 @@ func (a userOrderLookupAdapter) GetOrderByUserForTenant(tenant reseller.TenantCo
 
 type pendingLookupAdapter struct {
 	payments paymentcontract.Store
+	service  *paymentapp.PaymentService
 }
 
 func (a pendingLookupAdapter) GetLatestPendingByOrder(orderID uint, now time.Time) (*paymentdomain.Payment, error) {
 	return a.payments.GetLatestPendingByOrder(orderID, now)
+}
+
+func (a pendingLookupAdapter) GetByID(id uint) (*paymentdomain.Payment, error) {
+	return a.payments.GetByID(id)
+}
+
+func (a pendingLookupAdapter) CheckPendingPaymentAvailability(ctx context.Context, orderID uint) error {
+	return mapTransportError(a.service.CheckPendingPaymentAvailability(ctx, orderID))
 }
 
 type writerAdapter struct {

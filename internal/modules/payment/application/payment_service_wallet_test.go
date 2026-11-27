@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dujiao-next/internal/constants"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	"github.com/dujiao-next/internal/modules/payment/infrastructure/gateway/provider"
 	"github.com/dujiao-next/internal/platform/database/gormdb"
 	"github.com/dujiao-next/internal/shared/jsonmap"
@@ -27,6 +28,7 @@ import (
 	fulfillmentdomain "github.com/dujiao-next/internal/modules/fulfillment/domain"
 	userdomain "github.com/dujiao-next/internal/modules/identity/user/domain"
 	userstore "github.com/dujiao-next/internal/modules/identity/user/infrastructure/gormstore"
+	orderapp "github.com/dujiao-next/internal/modules/order/application"
 	orderdomain "github.com/dujiao-next/internal/modules/order/domain"
 	ordergormstore "github.com/dujiao-next/internal/modules/order/infrastructure/gormstore"
 	paymentcontract "github.com/dujiao-next/internal/modules/payment/contract"
@@ -1876,5 +1878,201 @@ func TestManualConfirmWalletRechargeValidatesPaymentAndRecordsProviderRef(t *tes
 			}
 			assertWalletRechargeSuccessState(t, db, payment.ID, recharge.ID, recharge.UserID, recharge.Amount.Decimal)
 		})
+	}
+}
+
+type paymentPurchaseCheckerFunc func(context.Context, []mappingcontract.PurchaseItem) error
+
+func (f paymentPurchaseCheckerFunc) CheckUpstreamPurchasable(ctx context.Context, items []mappingcontract.PurchaseItem) error {
+	return f(ctx, items)
+}
+
+func upstreamPaymentFixture(t *testing.T) (*PaymentService, *gorm.DB, *orderdomain.Order, *paymentdomain.PaymentChannel, productdomain.ProductSKU) {
+	t.Helper()
+	svc, db := setupPaymentServiceWalletTest(t)
+	channel, order := createFeePolicyOrderFixture(t, db, "upstream_check", "UPCHECK001")
+	user := userdomain.User{Email: "upstream-purchase@example.com", PasswordHash: "hash", Status: constants.UserStatusActive}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	order.UserID = user.ID
+	if err := db.Save(order).Error; err != nil {
+		t.Fatal(err)
+	}
+	product := productdomain.Product{Slug: "upstream-check-product", TitleJSON: jsonmap.JSON{"zh-CN": "测试上游商品"}, IsActive: true, FulfillmentType: constants.FulfillmentTypeUpstream, PriceAmount: money.FromDecimal(decimal.NewFromInt(100))}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	sku := productdomain.ProductSKU{ProductID: product.ID, SKUCode: "DEFAULT", IsActive: true, PriceAmount: money.FromDecimal(decimal.NewFromInt(100))}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatal(err)
+	}
+	item := orderdomain.OrderItem{OrderID: order.ID, ProductID: product.ID, SKUID: sku.ID, TitleJSON: product.TitleJSON, Quantity: 2, FulfillmentType: constants.FulfillmentTypeUpstream, UnitPrice: money.FromDecimal(decimal.NewFromInt(50)), TotalPrice: money.FromDecimal(decimal.NewFromInt(100))}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&walletdomain.Account{UserID: user.ID, Balance: money.FromDecimal(decimal.NewFromInt(500))}).Error; err != nil {
+		t.Fatal(err)
+	}
+	return svc, db, order, channel, sku
+}
+
+func assertUpstreamPaymentNotCharged(t *testing.T, db *gorm.DB, order *orderdomain.Order, payments int64) {
+	t.Helper()
+	var account walletdomain.Account
+	if err := db.Where("user_id = ?", order.UserID).First(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !account.Balance.Decimal.Equal(decimal.NewFromInt(500)) {
+		t.Fatalf("wallet was charged: %s", account.Balance.String())
+	}
+	var saved orderdomain.Order
+	if err := db.First(&saved, order.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != constants.OrderStatusPendingPayment || saved.WalletPaidAmount.Decimal.IsPositive() {
+		t.Fatalf("order was charged: %+v", saved)
+	}
+	var count int64
+	if err := db.Model(&paymentdomain.Payment{}).Where("order_id = ?", order.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != payments {
+		t.Fatalf("payment count=%d want=%d", count, payments)
+	}
+}
+
+func TestUpstreamPaymentCheckBlocksAllPaymentModesBeforeCharge(t *testing.T) {
+	for _, mode := range []string{"wallet", "online", "mixed"} {
+		t.Run(mode, func(t *testing.T) {
+			svc, db, order, channel, sku := upstreamPaymentFixture(t)
+			calls := 0
+			svc.SetUpstreamPurchaseChecker(paymentPurchaseCheckerFunc(func(_ context.Context, items []mappingcontract.PurchaseItem) error {
+				calls++
+				if len(items) != 1 || items[0].LocalSKUID != sku.ID || items[0].Quantity != 2 {
+					t.Fatalf("unexpected purchase items: %+v", items)
+				}
+				return mappingcontract.ErrUpstreamProductNotFound
+			}))
+			input := CreatePaymentInput{OrderID: order.ID, UseBalance: mode != "online"}
+			if mode != "wallet" {
+				input.ChannelID = channel.ID
+			}
+			_, err := svc.CreatePayment(input)
+			if !errors.Is(err, mappingcontract.ErrUpstreamProductNotFound) || calls != 1 {
+				t.Fatalf("payment err=%v calls=%d", err, calls)
+			}
+			assertUpstreamPaymentNotCharged(t, db, order, 0)
+		})
+	}
+}
+
+func TestUpstreamPaymentCannotReusePaymentLinkAfterStockCheckFails(t *testing.T) {
+	svc, db, order, channel, _ := upstreamPaymentFixture(t)
+	expires := time.Now().Add(10 * time.Minute)
+	payment := paymentdomain.Payment{OrderID: order.ID, ChannelID: channel.ID, Status: constants.PaymentStatusPending, PayURL: "https://pay.example/old-link", ExpiredAt: &expires}
+	if err := db.Create(&payment).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc.SetUpstreamPurchaseChecker(paymentPurchaseCheckerFunc(func(context.Context, []mappingcontract.PurchaseItem) error {
+		return mappingcontract.ErrUpstreamStockInsufficient
+	}))
+	result, err := svc.CreatePayment(CreatePaymentInput{OrderID: order.ID, ChannelID: channel.ID})
+	if result != nil || !errors.Is(err, mappingcontract.ErrUpstreamStockInsufficient) {
+		t.Fatalf("old payment link returned: result=%+v err=%v", result, err)
+	}
+	assertUpstreamPaymentNotCharged(t, db, order, 1)
+}
+
+func TestUpstreamPaymentRequiresCheckerAndBlocksProviderFailure(t *testing.T) {
+	for _, missing := range []bool{true, false} {
+		t.Run(fmt.Sprintf("missing_%t", missing), func(t *testing.T) {
+			svc, db, order, _, _ := upstreamPaymentFixture(t)
+			if !missing {
+				svc.SetUpstreamPurchaseChecker(paymentPurchaseCheckerFunc(func(context.Context, []mappingcontract.PurchaseItem) error {
+					return mappingcontract.ErrUpstreamCheckFailed
+				}))
+			}
+			_, err := svc.CreatePayment(CreatePaymentInput{OrderID: order.ID, UseBalance: true})
+			if !errors.Is(err, mappingcontract.ErrUpstreamCheckFailed) {
+				t.Fatalf("unchecked payment err=%v", err)
+			}
+			assertUpstreamPaymentNotCharged(t, db, order, 0)
+		})
+	}
+}
+
+func TestUpstreamPaymentRereadsProductAndSKUInsideTransaction(t *testing.T) {
+	for _, target := range []string{"product", "sku"} {
+		t.Run(target, func(t *testing.T) {
+			svc, db, order, _, sku := upstreamPaymentFixture(t)
+			svc.SetUpstreamPurchaseChecker(paymentPurchaseCheckerFunc(func(context.Context, []mappingcontract.PurchaseItem) error {
+				if target == "product" {
+					return db.Model(&productdomain.Product{}).Where("id = ?", sku.ProductID).Update("is_active", false).Error
+				}
+				return db.Model(&productdomain.ProductSKU{}).Where("id = ?", sku.ID).Update("is_active", false).Error
+			}))
+			_, err := svc.CreatePayment(CreatePaymentInput{OrderID: order.ID, UseBalance: true})
+			if !errors.Is(err, mappingcontract.ErrUpstreamProductNotFound) {
+				t.Fatalf("concurrent stop payment err=%v", err)
+			}
+			assertUpstreamPaymentNotCharged(t, db, order, 0)
+		})
+	}
+}
+
+func TestUpstreamPaymentChecksAllChildrenInOneBatch(t *testing.T) {
+	svc, db, order, _, sku := upstreamPaymentFixture(t)
+	if err := db.Where("order_id = ?", order.ID).Delete(&orderdomain.OrderItem{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		child := orderdomain.Order{OrderNo: fmt.Sprintf("UPCHECK001-%d", i), ParentID: &order.ID, UserID: order.UserID, Status: constants.OrderStatusPendingPayment, Currency: "CNY"}
+		if err := db.Create(&child).Error; err != nil {
+			t.Fatal(err)
+		}
+		item := orderdomain.OrderItem{OrderID: child.ID, ProductID: sku.ProductID, SKUID: sku.ID, TitleJSON: jsonmap.JSON{"zh-CN": "测试上游商品"}, Quantity: i + 1, FulfillmentType: constants.FulfillmentTypeUpstream}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	svc.SetUpstreamPurchaseChecker(paymentPurchaseCheckerFunc(func(_ context.Context, items []mappingcontract.PurchaseItem) error {
+		calls++
+		quantity := 0
+		for _, item := range items {
+			quantity += item.Quantity
+		}
+		if len(items) != 2 || quantity != 3 {
+			t.Fatalf("missing child items: %+v", items)
+		}
+		return mappingcontract.ErrUpstreamStockInsufficient
+	}))
+	_, err := svc.CreatePayment(CreatePaymentInput{OrderID: order.ID, UseBalance: true})
+	if !errors.Is(err, mappingcontract.ErrUpstreamStockInsufficient) || calls != 1 {
+		t.Fatalf("child check err=%v calls=%d", err, calls)
+	}
+	assertUpstreamPaymentNotCharged(t, db, order, 0)
+}
+
+func TestPendingPaymentAvailabilityDoesNotCreatePaymentOrCharge(t *testing.T) {
+	svc, db, order, _, _ := upstreamPaymentFixture(t)
+	calls := 0
+	svc.SetUpstreamPurchaseChecker(paymentPurchaseCheckerFunc(func(context.Context, []mappingcontract.PurchaseItem) error { calls++; return nil }))
+	if err := svc.CheckPendingPaymentAvailability(context.Background(), order.ID); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("checks=%d want=1", calls)
+	}
+	assertUpstreamPaymentNotCharged(t, db, order, 0)
+	if err := db.Model(&orderdomain.Order{}).Where("id = ?", order.ID).Update("status", constants.OrderStatusPaid).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CheckPendingPaymentAvailability(context.Background(), order.ID); !errors.Is(err, orderapp.ErrOrderStatusInvalid) {
+		t.Fatalf("paid order err=%v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("paid order queried provider again: calls=%d", calls)
 	}
 }

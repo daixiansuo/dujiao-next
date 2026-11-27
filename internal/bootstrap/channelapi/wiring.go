@@ -1,6 +1,7 @@
 package channelwiring
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -147,6 +148,10 @@ func (a orderAdapter) ListOrdersByUser(filter channeltransport.OrderListFilter) 
 
 type paymentAdapter struct {
 	payments *paymentapp.PaymentService
+}
+
+func (a paymentAdapter) CheckPendingPaymentAvailability(ctx context.Context, orderID uint) error {
+	return mapError(a.payments.CheckPendingPaymentAvailability(ctx, orderID))
 }
 
 func (a paymentAdapter) GetWalletRechargeChannels() ([]paymentdomain.PaymentChannel, error) {

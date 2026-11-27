@@ -296,6 +296,7 @@ var paymentCallbackErrorRules = concatMappedErrors(
 // EpayRedirectPaymentLookup 只读取渲染易支付跳转表单所需的支付记录。
 type EpayRedirectPaymentLookup interface {
 	GetByID(id uint) (*paymentdomain.Payment, error)
+	CheckPendingPaymentAvailability(context.Context, uint) error
 }
 
 // EpayRedirectHandler 把已保存的 v2 跳转参数渲染成自动提交的 POST 表单。
@@ -351,6 +352,13 @@ func (h *EpayRedirectHandler) EpayRedirect(c *gin.Context) {
 	if !accepted {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
+	}
+	// 必须先验证签名表单的访问令牌，再核验商品；充值单没有商品订单，沿用原流程。
+	if payment.OrderID > 0 {
+		if err := h.payments.CheckPendingPaymentAvailability(c.Request.Context(), payment.OrderID); err != nil {
+			respondPaymentCreateError(c, err)
+			return
+		}
 	}
 	var body bytes.Buffer
 	if err := epayRedirectTemplate.Execute(&body, epayRedirectView{Action: action, Fields: fields}); err != nil {

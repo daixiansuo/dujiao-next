@@ -449,7 +449,7 @@ func TestBatchImportByCategoryUncategorizedGroup(t *testing.T) {
 			case "/api/v1/upstream/products":
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"ok":       true,
-					"items":    []upstream.UpstreamProduct{{ID: 101, CategoryID: 0, Title: jsonmap.JSON{"zh-CN": "无分类"}, PriceAmount: "10.00", IsActive: true}},
+					"items":    []upstream.UpstreamProduct{{ID: 101, CategoryID: 0, Title: jsonmap.JSON{"zh-CN": "无分类"}, PriceAmount: "10.00", IsActive: true, SKUs: []upstream.UpstreamSKU{}}},
 					"total":    1,
 					"page":     1,
 					"per_page": 50,

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dujiao-next/internal/i18n"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	couponcontract "github.com/dujiao-next/internal/modules/coupon/contract"
 	telegramauthapp "github.com/dujiao-next/internal/modules/identity/telegramauth/application"
 	userauthapp "github.com/dujiao-next/internal/modules/identity/userauth/application"
@@ -30,7 +31,15 @@ func channelErrorRule(target error, httpCode, code int, errorCode, key string) m
 	return mappedChannelError{target: target, httpCode: httpCode, code: code, errorCode: errorCode, key: key}
 }
 
-var channelOrderCreateErrorRules = []mappedChannelError{
+var channelUpstreamAvailabilityErrorRules = []mappedChannelError{
+	channelErrorRule(mappingcontract.ErrUpstreamStockInsufficient, http.StatusBadRequest, response.CodeBadRequest, "sku_out_of_stock", "error.upstream_stock_insufficient"),
+	channelErrorRule(mappingcontract.ErrUpstreamCheckFailed, http.StatusServiceUnavailable, response.CodeBadRequest, "upstream_check_failed", "error.upstream_check_failed"),
+	channelErrorRule(mappingcontract.ErrUpstreamProductNotFound, http.StatusBadRequest, response.CodeBadRequest, "product_unavailable", "error.product_not_available"),
+	channelErrorRule(mappingcontract.ErrMappingNotFound, http.StatusBadRequest, response.CodeBadRequest, "product_unavailable", "error.product_not_available"),
+	channelErrorRule(mappingcontract.ErrMappingInactive, http.StatusBadRequest, response.CodeBadRequest, "product_unavailable", "error.product_not_available"),
+}
+
+var channelOrderCreateErrorRules = append([]mappedChannelError{
 	channelErrorRule(ErrRiskIPBlacklisted, http.StatusForbidden, response.CodeForbidden, "risk_blocked", "error.risk_ip_blacklisted"),
 	channelErrorRule(ErrRiskClientIPUnavailable, http.StatusForbidden, response.CodeForbidden, "risk_blocked", "error.risk_client_ip_unavailable"),
 	channelErrorRule(ErrRiskTooManyPendingOrders, http.StatusTooManyRequests, response.CodeTooManyRequests, "risk_blocked", "error.risk_too_many_pending_orders"),
@@ -69,9 +78,9 @@ var channelOrderCreateErrorRules = []mappedChannelError{
 	channelErrorRule(ErrManualFormFieldInvalid, http.StatusBadRequest, response.CodeBadRequest, "validation_error", "error.manual_form_field_invalid"),
 	channelErrorRule(ErrManualFormTypeInvalid, http.StatusBadRequest, response.CodeBadRequest, "validation_error", "error.manual_form_type_invalid"),
 	channelErrorRule(ErrManualFormOptionInvalid, http.StatusBadRequest, response.CodeBadRequest, "validation_error", "error.manual_form_option_invalid"),
-}
+}, channelUpstreamAvailabilityErrorRules...)
 
-var channelPaymentCreateErrorRules = []mappedChannelError{
+var channelPaymentCreateErrorRules = append([]mappedChannelError{
 	channelErrorRule(ErrPaymentInvalid, http.StatusBadRequest, response.CodeBadRequest, "validation_error", "error.payment_invalid"),
 	channelErrorRule(ErrOrderNotFound, http.StatusNotFound, response.CodeNotFound, "order_not_found", "error.order_not_found"),
 	channelErrorRule(ErrOrderStatusInvalid, http.StatusBadRequest, response.CodeBadRequest, "order_status_invalid", "error.order_status_invalid"),
@@ -83,7 +92,7 @@ var channelPaymentCreateErrorRules = []mappedChannelError{
 	channelErrorRule(ErrPaymentGatewayResponseInvalid, http.StatusBadRequest, response.CodeBadRequest, "payment_create_failed", "error.payment_gateway_response_invalid"),
 	channelErrorRule(ErrPaymentCurrencyMismatch, http.StatusBadRequest, response.CodeBadRequest, "payment_create_failed", "error.payment_currency_mismatch"),
 	channelErrorRule(ErrWalletOnlyPaymentRequired, http.StatusBadRequest, response.CodeBadRequest, "wallet_only_payment_required", "error.wallet_only_payment_required"),
-}
+}, channelUpstreamAvailabilityErrorRules...)
 
 func respondChannelSuccess(c *gin.Context, data interface{}) {
 	response.ChannelSuccess(c, data)

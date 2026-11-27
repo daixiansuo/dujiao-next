@@ -85,6 +85,7 @@ func (c *Container) initIntegrationServices() {
 	c.ProductMappingService.SetSettings(c.SettingService)
 	c.SiteConnectionService.SetMarkupReapplier(c.ProductMappingService)
 	c.OrderService.SetProductMappingService(c.ProductMappingService)
+	c.OrderService.SetUpstreamPurchaseChecker(c.ProductMappingService)
 	var downstreamQueue downstreamcallbackcontract.CallbackQueue
 	if c.QueueClient != nil {
 		downstreamQueue = downstreamcallbackqueue.New(c.QueueClient)
@@ -115,17 +116,19 @@ func (c *Container) initIntegrationServices() {
 		PaymentProviderRegistry: c.PaymentProviderRegistry,
 		ResellerAccounting:      c.ResellerAccountingLedger,
 	})
+	c.PaymentService.SetUpstreamPurchaseChecker(c.ProductMappingService)
 	c.ProcurementOrderService = procurementapp.NewService(procurementapp.Options{
-		Repository:         c.ProcurementOrderRepo,
-		Orders:             procurementorder.New(c.OrderStore),
-		ProductMappings:    procurementmapping.NewProducts(c.ProductMappingRepo),
-		SKUMappings:        procurementmapping.NewSKUs(c.SKUMappingRepo),
-		Connections:        procurementupstream.New(c.SiteConnectionService),
-		Queue:              procurementqueue.New(c.QueueClient),
-		OrderLifecycle:     c.ProcurementOrderRepo.NewLifecycle(c.QueueClient, c.SettingService, c.Config.Email),
-		DownstreamCallback: c.DownstreamCallbackService,
-		BotNotifier:        c.FulfillmentService,
-		Notifications:      procurementnotification.New(c.NotificationService),
+		Repository:           c.ProcurementOrderRepo,
+		AvailabilityReporter: c.ProductMappingService,
+		Orders:               procurementorder.New(c.OrderStore),
+		ProductMappings:      procurementmapping.NewProducts(c.ProductMappingRepo),
+		SKUMappings:          procurementmapping.NewSKUs(c.SKUMappingRepo),
+		Connections:          procurementupstream.New(c.SiteConnectionService),
+		Queue:                procurementqueue.New(c.QueueClient),
+		OrderLifecycle:       c.ProcurementOrderRepo.NewLifecycle(c.QueueClient, c.SettingService, c.Config.Email),
+		DownstreamCallback:   c.DownstreamCallbackService,
+		BotNotifier:          c.FulfillmentService,
+		Notifications:        procurementnotification.New(c.NotificationService),
 	})
 	c.ReconciliationService = reconciliationapp.NewService(reconciliationapp.Options{
 		Jobs: c.ReconciliationJobRepo, Items: c.ReconciliationItemRepo,

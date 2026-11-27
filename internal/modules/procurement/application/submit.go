@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strconv"
@@ -95,12 +96,32 @@ func (s *Service) SubmitToUpstream(procurementOrderID uint) error {
 	}
 
 	if !resp.OK {
+		// 明确不可售时立即回写，避免下一位用户再次付款后才发现上游拒绝。
+		// 连接、余额和网络错误不属于商品失效，不能据此批量停售。
+		var availabilityErr error
+		code := strings.ToLower(strings.TrimSpace(resp.ErrorCode))
+		switch code {
+		case "product_deleted", "product_not_found", "product_unavailable",
+			"sku_deleted", "sku_not_found", "sku_unavailable", "product_out_of_stock", "sku_out_of_stock", "insufficient_stock":
+			if s.availabilityReporter == nil {
+				availabilityErr = errors.New("upstream availability reporter is not configured")
+			} else {
+				availabilityErr = s.availabilityReporter.ReportUpstreamUnavailable(ctx, item.ProductID, item.SKUID, code)
+			}
+			if availabilityErr != nil {
+				logger.Errorw("procurement_availability_update_failed",
+					"procurement_order_id", procOrder.ID, "connection_id", procOrder.ConnectionID,
+					"local_product_id", item.ProductID, "local_sku_id", item.SKUID,
+					"error_code", code, "error", availabilityErr)
+			}
+		}
 		retryable := isRetryableErrorCode(resp.ErrorCode)
 		errMsg := resp.ErrorMessage
 		if errMsg == "" {
 			errMsg = resp.ErrorCode
 		}
-		return s.handleSubmitFailure(procOrder, connection, errMsg, retryable)
+		// 停售回写失败也必须完成原采购拒绝及告警，两个错误均保留供诊断。
+		return errors.Join(s.handleSubmitFailure(procOrder, connection, errMsg, retryable), availabilityErr)
 	}
 
 	// 成功：更新状态，重置 retry_count 用于轮询阶段
@@ -307,12 +328,18 @@ func isRetryableErrorCode(code string) bool {
 		"insufficient_balance": true,
 		"payment_failed":       true,
 		"product_unavailable":  true,
+		"product_deleted":      true,
+		"product_not_found":    true,
 		"sku_unavailable":      true,
+		"sku_deleted":          true,
+		"sku_not_found":        true,
 		"invalid_request":      true,
 		"unauthorized":         true,
 		"forbidden":            true,
 		"duplicate_order":      true,
 		"product_out_of_stock": true,
+		"sku_out_of_stock":     true,
+		"insufficient_stock":   true,
 	}
 	return !nonRetryable[strings.ToLower(strings.TrimSpace(code))]
 }

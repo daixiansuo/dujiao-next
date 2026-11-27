@@ -1,6 +1,7 @@
 package paymenthttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"html"
@@ -14,6 +15,7 @@ import (
 	paymentdomain "github.com/dujiao-next/internal/modules/payment/domain"
 
 	"github.com/dujiao-next/internal/constants"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	"github.com/dujiao-next/internal/platform/http/response"
 	"github.com/dujiao-next/internal/shared/jsonmap"
 
@@ -213,7 +215,15 @@ func TestEpayRedirectHandlerRejects(t *testing.T) {
 }
 
 type fakeEpayRedirectPayments struct {
-	byID map[uint]*paymentdomain.Payment
+	byID  map[uint]*paymentdomain.Payment
+	check func(context.Context, uint) error
+}
+
+func (f fakeEpayRedirectPayments) CheckPendingPaymentAvailability(ctx context.Context, orderID uint) error {
+	if f.check != nil {
+		return f.check(ctx, orderID)
+	}
+	return nil
 }
 
 func (f fakeEpayRedirectPayments) GetByID(id uint) (*paymentdomain.Payment, error) {
@@ -285,4 +295,47 @@ func htmlAttributeMap(tag string) map[string]string {
 		out[strings.ToLower(match[1])] = value
 	}
 	return out
+}
+
+func TestEpayRedirectChecksOnlyAuthorizedPendingProductPayment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const token = "0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name    string
+		orderID uint
+		status  string
+		token   string
+		err     error
+		checks  int
+		form    bool
+	}{
+		{name: "available product", orderID: 18, status: constants.PaymentStatusPending, token: token, checks: 1, form: true},
+		{name: "unavailable product", orderID: 18, status: constants.PaymentStatusPending, token: token, err: mappingcontract.ErrUpstreamProductNotFound, checks: 1},
+		{name: "insufficient stock", orderID: 18, status: constants.PaymentStatusPending, token: token, err: mappingcontract.ErrUpstreamStockInsufficient, checks: 1},
+		{name: "unknown availability", orderID: 18, status: constants.PaymentStatusPending, token: token, err: mappingcontract.ErrUpstreamCheckFailed, checks: 1},
+		{name: "wrong token", orderID: 18, status: constants.PaymentStatusPending, token: "wrong", checks: 0},
+		{name: "paid payment", orderID: 18, status: constants.PaymentStatusSuccess, token: token, checks: 0},
+		{name: "wallet recharge", orderID: 0, status: constants.PaymentStatusPending, token: token, checks: 0, form: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payment := epayRedirectPayment(7, token, "https://gateway.example.com/api/pay/submit", "private-sign", "https://shop.example/return")
+			payment.OrderID, payment.Status = tc.orderID, tc.status
+			checks := 0
+			lookup := fakeEpayRedirectPayments{byID: map[uint]*paymentdomain.Payment{7: payment}, check: func(_ context.Context, orderID uint) error {
+				checks++
+				if orderID != tc.orderID {
+					t.Fatalf("wrong order: %d", orderID)
+				}
+				return tc.err
+			}}
+			router := gin.New()
+			RegisterEpayRedirectRoute(router.Group("/api/v1"), NewEpayRedirectHandler(lookup))
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/payments/epay-redirect?payment_id=7&token="+tc.token, nil))
+			form := strings.Contains(strings.ToLower(recorder.Body.String()), "<form")
+			if checks != tc.checks || form != tc.form || (!tc.form && strings.Contains(recorder.Body.String(), "private-sign")) {
+				t.Fatalf("unsafe redirect: checks=%d form=%t body=%s", checks, form, recorder.Body.String())
+			}
+		})
+	}
 }

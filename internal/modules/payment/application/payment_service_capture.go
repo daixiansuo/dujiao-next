@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
+	orderdomain "github.com/dujiao-next/internal/modules/order/domain"
 
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/logger"
@@ -285,4 +289,94 @@ func (s *PaymentService) GetWalletRechargeRefundFeeSnapshot(id uint) (walletcont
 		return walletcontract.RechargeRefundFeeSnapshot{PaymentAmount: payment.Amount, PaymentFee: payment.FeeAmount}, nil
 	}
 	return walletcontract.RechargeRefundFeeSnapshot{}, nil
+}
+
+// SetUpstreamPurchaseChecker 注入付款前核验，所有在线、余额及混合支付共用此入口。
+func (s *PaymentService) SetUpstreamPurchaseChecker(checker mappingcontract.PurchaseChecker) {
+	if s != nil {
+		s.upstreamPurchaseChecker = checker
+	}
+}
+
+// CheckPendingPaymentAvailability 只核验待付订单，供恢复旧支付链接使用，不创建支付或扣款。
+func (s *PaymentService) CheckPendingPaymentAvailability(ctx context.Context, orderID uint) error {
+	return s.checkUpstreamPayment(CreatePaymentInput{OrderID: orderID, Context: ctx})
+}
+
+// upstreamPaymentItems 汇总父订单与全部子订单的上游行，避免遗漏拆单后的商品。
+func upstreamPaymentItems(order *orderdomain.Order) []orderdomain.OrderItem {
+	if order == nil {
+		return nil
+	}
+	var items []orderdomain.OrderItem
+	for _, item := range order.Items {
+		if item.FulfillmentType == constants.FulfillmentTypeUpstream {
+			items = append(items, item)
+		}
+	}
+	for i := range order.Children {
+		items = append(items, upstreamPaymentItems(&order.Children[i])...)
+	}
+	return items
+}
+
+// checkUpstreamPayment 在任何扣款或支付链接复用之前查询远端，事务内不发 HTTP 请求。
+func (s *PaymentService) checkUpstreamPayment(input CreatePaymentInput) error {
+	order, err := s.orderRepo.GetByID(input.OrderID)
+	if err != nil {
+		return orderapp.ErrOrderFetchFailed
+	}
+	if order == nil {
+		return orderapp.ErrOrderNotFound
+	}
+	if order.ParentID != nil {
+		return ErrPaymentInvalid
+	}
+	if order.Status != constants.OrderStatusPendingPayment || (order.ExpiresAt != nil && !order.ExpiresAt.After(time.Now())) {
+		return orderapp.ErrOrderStatusInvalid
+	}
+	items := upstreamPaymentItems(order)
+	if len(items) == 0 {
+		return nil
+	}
+	if s.upstreamPurchaseChecker == nil {
+		paymentLogger("order_id", order.ID).Errorw("payment_upstream_checker_missing")
+		return mappingcontract.ErrUpstreamCheckFailed
+	}
+	purchases := make([]mappingcontract.PurchaseItem, 0, len(items))
+	for _, item := range items {
+		purchases = append(purchases, mappingcontract.PurchaseItem{LocalSKUID: item.SKUID, Quantity: item.Quantity})
+	}
+	parent := input.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	defer cancel()
+	if err := s.upstreamPurchaseChecker.CheckUpstreamPurchasable(ctx, purchases); err != nil {
+		paymentLogger("order_id", order.ID).Warnw("payment_upstream_purchase_check_failed", "items", len(purchases), "error", err)
+		return err
+	}
+	return nil
+}
+
+// validateUpstreamPaymentInTx 在收款事务中重读本地停售状态，不能复用核验前的商品快照。
+func validateUpstreamPaymentInTx(order *orderdomain.Order, tx paymentcontract.Transaction) error {
+	for _, item := range upstreamPaymentItems(order) {
+		product, err := tx.Products().GetByID(strconv.FormatUint(uint64(item.ProductID), 10))
+		if err != nil {
+			return fmt.Errorf("%w: %v", mappingcontract.ErrUpstreamCheckFailed, err)
+		}
+		if product == nil || !product.IsActive || product.FulfillmentType != constants.FulfillmentTypeUpstream {
+			return mappingcontract.ErrUpstreamProductNotFound
+		}
+		sku, err := tx.ProductSKUs().GetByID(item.SKUID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", mappingcontract.ErrUpstreamCheckFailed, err)
+		}
+		if sku == nil || !sku.IsActive || sku.ProductID != product.ID {
+			return mappingcontract.ErrUpstreamProductNotFound
+		}
+	}
+	return nil
 }

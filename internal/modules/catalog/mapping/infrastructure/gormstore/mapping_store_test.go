@@ -254,3 +254,26 @@ func TestMappingStoreDeleteHidesMappingFromEveryReadPath(t *testing.T) {
 		t.Fatalf("ListUpstreamIDsByConnection after delete = ids %v err %v; want empty", ids, err)
 	}
 }
+
+func TestMappingAvailabilityWritesPreserveNewerStopAndOperatorSwitch(t *testing.T) {
+	store, _, db := setupMappingStoreTest(t)
+	product := createMappedProduct(t, db, "availability-write", "停售保护")
+	mapping := createMapping(t, store, 1, product.ID, 100, mappingdomain.UpstreamStatusActive, false)
+	stoppedAt := time.Now().UTC()
+	if err := store.UpdateSyncState(mapping.ID, mappingdomain.UpstreamStatusInactive, stoppedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateSyncMetadata(mapping.ID, 99, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateSyncState(mapping.ID, mappingdomain.UpstreamStatusActive, stoppedAt.Add(-time.Second)); err == nil {
+		t.Fatal("stale sync must not overwrite newer unavailability")
+	}
+	got, err := store.GetByID(mapping.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IsActive || got.UpstreamStatus != mappingdomain.UpstreamStatusInactive || !got.LastSyncedAt.Equal(stoppedAt) || got.UpstreamCategoryID != 99 || got.UpstreamFulfillmentType != "auto" {
+		t.Fatalf("narrow writes changed availability or lost metadata: %+v", got)
+	}
+}

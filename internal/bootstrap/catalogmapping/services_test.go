@@ -18,6 +18,7 @@ import (
 
 	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
 
+	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 
 	categorycontract "github.com/dujiao-next/internal/modules/catalog/category/contract"
@@ -326,8 +327,8 @@ func TestSyncProductMarksDeletedWhenUpstreamSoftDeleted(t *testing.T) {
 	if got.UpstreamStatus != mappingdomain.UpstreamStatusDeleted {
 		t.Fatalf("expected upstream_status=deleted, got %q", got.UpstreamStatus)
 	}
-	if got.IsActive {
-		t.Fatalf("expected mapping to be deactivated for deleted upstream")
+	if !got.IsActive {
+		t.Fatalf("automatic unavailability must retain the synchronization switch")
 	}
 
 	var product productdomain.Product
@@ -617,11 +618,18 @@ func TestBatchImportByIDsScansListAndFallsBackForMissing(t *testing.T) {
 }
 
 func TestSyncConnectionStockMarksDeletedWhenFullSyncMissing(t *testing.T) {
-	// 上游 ListProducts 返回空列表 + includes_inactive=true →
-	// 全量模式下 mapping 在列表中 missing 必定意味着上游已软删
+	// 列表缺失必须详情复核；只有详情明确 product_deleted 才记录 deleted。
 	svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t,
 		"file:sync_full_missing_deleted?mode=memory&cache=shared",
-		listProductsHandler([]upstream.UpstreamProduct{}, true),
+		func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/products") {
+				listProductsHandler([]upstream.UpstreamProduct{}, true)(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": "product_deleted"})
+		},
 	)
 	defer cleanup()
 
@@ -636,8 +644,8 @@ func TestSyncConnectionStockMarksDeletedWhenFullSyncMissing(t *testing.T) {
 	if got.UpstreamStatus != mappingdomain.UpstreamStatusDeleted {
 		t.Fatalf("expected upstream_status=deleted, got %q", got.UpstreamStatus)
 	}
-	if got.IsActive {
-		t.Fatalf("expected mapping to be deactivated when upstream marks deleted")
+	if !got.IsActive {
+		t.Fatalf("automatic unavailability must retain the synchronization switch")
 	}
 
 	var product productdomain.Product
@@ -650,16 +658,21 @@ func TestSyncConnectionStockMarksDeletedWhenFullSyncMissing(t *testing.T) {
 }
 
 func TestSyncConnectionStockKeepsLegacyUpstreamMissing(t *testing.T) {
-	// 上游空列表 + includes_inactive=false（旧上游不支持新参数）→
-	// 不能据此推断"missing=已删除"，本地状态应保持不变
+	// 旧上游列表缺失后详情遇到鉴权异常，不能将其误判为停售。
 	svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t,
 		"file:sync_full_missing_legacy?mode=memory&cache=shared",
-		listProductsHandler([]upstream.UpstreamProduct{}, false),
+		func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/products") {
+				listProductsHandler([]upstream.UpstreamProduct{}, false)(w, r)
+				return
+			}
+			http.Error(w, "authentication failed", http.StatusUnauthorized)
+		},
 	)
 	defer cleanup()
 
-	if err := svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200); err != nil {
-		t.Fatalf("syncConnectionStock returned error: %v", err)
+	if err := svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200); err == nil {
+		t.Fatal("detail lookup failure must be included in task failure")
 	}
 
 	var got mappingdomain.Mapping
@@ -695,7 +708,7 @@ func TestSyncConnectionStockKeepsMappingWhenFullSyncIncomplete(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok": true,
 				"items": []upstream.UpstreamProduct{
-					{ID: 999, Title: jsonmap.JSON{"zh-CN": "其他商品"}, PriceAmount: "1.00", IsActive: true},
+					{ID: 999, Title: jsonmap.JSON{"zh-CN": "其他商品"}, PriceAmount: "1.00", IsActive: true, SKUs: []upstream.UpstreamSKU{}},
 				},
 				"total":             10,
 				"page":              1,
@@ -720,8 +733,8 @@ func TestSyncConnectionStockKeepsMappingWhenFullSyncIncomplete(t *testing.T) {
 	)
 	defer cleanup()
 
-	if err := svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200); err != nil {
-		t.Fatalf("syncConnectionStock returned error: %v", err)
+	if err := svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200); err == nil {
+		t.Fatal("incomplete pagination must fail the task")
 	}
 
 	var got mappingdomain.Mapping
@@ -736,13 +749,13 @@ func TestSyncConnectionStockKeepsMappingWhenFullSyncIncomplete(t *testing.T) {
 	}
 }
 
-func TestEnsureUpstreamStockReturnsNilWhenCachedStockSufficient(t *testing.T) {
-	// 缓存库存=100，下单需要 1 → 直接放行，不应触发上游调用
+func TestEnsureUpstreamStockChecksRemoteWhenCachedStockSufficient(t *testing.T) {
+	// 缓存库存充足仍核验详情，避免旧库存掩盖上游停售。
 	var callCount int
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": upstream.UpstreamProduct{ID: 101, IsActive: true, SKUs: []upstream.UpstreamSKU{{ID: 201, IsActive: true, PriceAmount: "10.00", StockQuantity: 100}}}})
 	}
 	svc, db, _, cleanup := setupMappingWithUpstreamHandler(t,
 		"file:preorder_cache_sufficient?mode=memory&cache=shared",
@@ -758,8 +771,8 @@ func TestEnsureUpstreamStockReturnsNilWhenCachedStockSufficient(t *testing.T) {
 	if err := svc.EnsureUpstreamStockForOrder(sku.ID, 1); err != nil {
 		t.Fatalf("expected nil for sufficient cached stock, got %v", err)
 	}
-	if callCount != 0 {
-		t.Fatalf("expected zero upstream calls when cache is sufficient, got %d", callCount)
+	if callCount != 1 {
+		t.Fatalf("expected one detail check despite sufficient cache, got %d", callCount)
 	}
 }
 
@@ -769,13 +782,20 @@ func TestEnsureUpstreamStockReturnsNilWhenNoMapping(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}
-	svc, _, _, cleanup := setupMappingWithUpstreamHandler(t,
+	svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t,
 		"file:preorder_no_mapping?mode=memory&cache=shared",
 		handler,
 	)
 	defer cleanup()
 
-	if err := svc.EnsureUpstreamStockForOrder(99999, 1); err != nil {
+	if err := db.Model(&productdomain.Product{}).Where("id = ?", mapping.LocalProductID).Update("fulfillment_type", constants.FulfillmentTypeManual).Error; err != nil {
+		t.Fatal(err)
+	}
+	var sku productdomain.ProductSKU
+	if err := db.First(&sku).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.EnsureUpstreamStockForOrder(sku.ID, 1); err != nil {
 		t.Fatalf("expected nil for non-upstream sku, got %v", err)
 	}
 }
@@ -823,8 +843,8 @@ func TestEnsureUpstreamStockRejectsWhenUpstreamReportsZero(t *testing.T) {
 	}
 }
 
-func TestEnsureUpstreamStockFailsOpenWhenUpstreamDown(t *testing.T) {
-	// 缓存=0，上游 500 → fail-open，下单放行
+func TestEnsureUpstreamStockRejectsWhenUpstreamDown(t *testing.T) {
+	// 上游 500 必须阻断购买，同时保留本地状态。
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream down", http.StatusInternalServerError)
 	}
@@ -844,8 +864,8 @@ func TestEnsureUpstreamStockFailsOpenWhenUpstreamDown(t *testing.T) {
 		t.Fatalf("load sku failed: %v", err)
 	}
 
-	if err := svc.EnsureUpstreamStockForOrder(sku.ID, 1); err != nil {
-		t.Fatalf("expected nil (fail-open) when upstream is down, got %v", err)
+	if err := svc.EnsureUpstreamStockForOrder(sku.ID, 1); !errors.Is(err, mappingcontract.ErrUpstreamCheckFailed) {
+		t.Fatalf("expected check failure when upstream is down, got %v", err)
 	}
 }
 
@@ -1006,6 +1026,7 @@ func TestImportUpstreamProductPrefersUpstreamSlug(t *testing.T) {
 				Title:       jsonmap.JSON{"zh-CN": "P"},
 				PriceAmount: "10.00",
 				IsActive:    true,
+				SKUs:        []upstream.UpstreamSKU{},
 			},
 		})
 	}))
@@ -1083,6 +1104,33 @@ func (r *concurrentProductEditStore) GetByID(id string) (*productdomain.Product,
 func (r *concurrentProductEditStore) QuickUpdate(id string, fields map[string]interface{}) error {
 	r.quickUpdates = append(r.quickUpdates, fields)
 	return r.ProductStore.QuickUpdate(id, fields)
+}
+
+// BindTx 保留并发写入观察，同时全部操作走事务句柄。
+func (r *concurrentProductEditStore) BindTx(tx *gorm.DB) productcontract.Repository {
+	return &concurrentProductEditTxStore{Repository: r.ProductStore.BindTx(tx), observer: r}
+}
+
+type concurrentProductEditTxStore struct {
+	productcontract.Repository
+	observer *concurrentProductEditStore
+}
+
+func (r *concurrentProductEditTxStore) GetByID(id string) (*productdomain.Product, error) {
+	product, err := r.Repository.GetByID(id)
+	if err != nil || product == nil || r.observer.snapshot != nil {
+		return product, err
+	}
+	r.observer.snapshot = product
+	if err := r.Repository.QuickUpdate(id, concurrentLocalProductFields()); err != nil {
+		return nil, err
+	}
+	return product, nil
+}
+
+func (r *concurrentProductEditTxStore) QuickUpdate(id string, fields map[string]interface{}) error {
+	r.observer.quickUpdates = append(r.observer.quickUpdates, fields)
+	return r.Repository.QuickUpdate(id, fields)
 }
 
 func concurrentLocalProductFields() map[string]interface{} {
@@ -1205,14 +1253,11 @@ func TestSyncPreservesConcurrentLocalProductEdits(t *testing.T) {
 						wantPrice, wantCost = "14.00", "10.00"
 					}
 					product := assertConcurrentProductEdit(t, db, mapping.LocalProductID, repo, wantFields...)
-					if !reflect.DeepEqual(product.ManualFormSchemaJSON, wantForm) || !reflect.DeepEqual(repo.snapshot.ManualFormSchemaJSON, wantForm) {
+					if !reflect.DeepEqual(product.ManualFormSchemaJSON, wantForm) {
 						t.Errorf("form not synchronized in storage and memory: product=%v snapshot=%v want=%v", product.ManualFormSchemaJSON, repo.snapshot.ManualFormSchemaJSON, wantForm)
 					}
 					if product.PriceAmount.String() != wantPrice || product.CostPriceAmount.String() != wantCost || !product.IsActive || !product.IsMapped {
 						t.Errorf("unexpected synchronized product: %+v", product)
-					}
-					if repo.snapshot.PriceAmount.String() != wantPrice || repo.snapshot.CostPriceAmount.String() != wantCost {
-						t.Errorf("prices not updated in memory: %+v", repo.snapshot)
 					}
 					var gotMapping mappingdomain.Mapping
 					if err := db.First(&gotMapping, mapping.ID).Error; err != nil {
@@ -1258,7 +1303,7 @@ func TestSyncUnavailablePreservesConcurrentLocalProductEdits(t *testing.T) {
 					wantFields = append(wantFields, "is_active")
 				}
 				product := assertConcurrentProductEdit(t, db, mapping.LocalProductID, repo, wantFields...)
-				if product.IsActive || repo.snapshot.IsActive || !product.IsMapped || product.FulfillmentType != constants.FulfillmentTypeUpstream || product.PriceAmount.String() != "10.00" || product.ManualFormSchemaJSON["local"] != "form" {
+				if product.IsActive || !product.IsMapped || product.FulfillmentType != constants.FulfillmentTypeUpstream || product.PriceAmount.String() != "10.00" || product.ManualFormSchemaJSON["local"] != "form" {
 					t.Errorf("unexpected unavailable product: %+v", product)
 				}
 				var gotMapping mappingdomain.Mapping
@@ -1269,7 +1314,7 @@ func TestSyncUnavailablePreservesConcurrentLocalProductEdits(t *testing.T) {
 				if deleted {
 					wantStatus = mappingdomain.UpstreamStatusDeleted
 				}
-				if gotMapping.UpstreamStatus != wantStatus || gotMapping.IsActive == deleted || gotMapping.LastSyncedAt == nil {
+				if gotMapping.UpstreamStatus != wantStatus || !gotMapping.IsActive || gotMapping.LastSyncedAt == nil {
 					t.Errorf("unexpected unavailable mapping: %+v", gotMapping)
 				}
 				var skuMapping mappingdomain.SKUMapping

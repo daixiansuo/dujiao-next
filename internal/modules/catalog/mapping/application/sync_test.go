@@ -102,6 +102,37 @@ func (r staticMappingRepo) Update(_ *mappingdomain.Mapping) error {
 	return nil
 }
 
+func (r staticMappingRepo) UpdateSyncState(_ uint, status string, at time.Time) error {
+	r.mapping.UpstreamStatus = status
+	r.mapping.LastSyncedAt = &at
+	return nil
+}
+
+func (r staticMappingRepo) UpdateSyncMetadata(_ uint, categoryID uint, fulfillment string) error {
+	r.mapping.UpstreamCategoryID = categoryID
+	r.mapping.UpstreamFulfillmentType = fulfillment
+	return nil
+}
+
+// fakeAvailabilityTransaction 只装配测试仓储；真实回滚与事务绑定由 bootstrap SQLite 测试覆盖。
+type fakeAvailabilityTransaction struct {
+	mappingcontract.UnitOfWork
+	repositories mappingcontract.AvailabilityRepositories
+}
+
+func (f fakeAvailabilityTransaction) WithinAvailabilityTransaction(fn func(mappingcontract.AvailabilityRepositories) error) error {
+	return fn(f.repositories)
+}
+
+func bindFakeAvailabilityTransaction(svc *Service) {
+	svc.transactions = fakeAvailabilityTransaction{repositories: mappingcontract.AvailabilityRepositories{
+		Products:    svc.products,
+		Mappings:    svc.mappings.(mappingcontract.AvailabilityMappingRepository),
+		SKUs:        svc.skus.(mappingcontract.AvailabilitySKURepository),
+		SKUMappings: svc.skuMappings.(mappingcontract.AvailabilitySKUMappingRepository),
+	}}
+}
+
 // recordingSKURepo 记录被写回的 SKU，用来断言价格没被动过。
 type recordingSKURepo struct {
 	mappingcontract.SKURepository
@@ -116,6 +147,12 @@ func (r *recordingSKURepo) Update(item *productdomain.ProductSKU) error {
 
 func (r *recordingSKURepo) GetByID(_ uint) (*productdomain.ProductSKU, error) {
 	return &productdomain.ProductSKU{ID: 1, PriceAmount: money.FromDecimal(decimal.NewFromInt(100))}, nil
+}
+
+func (r *recordingSKURepo) SetInactive(_ uint) error { return nil }
+
+func (r *recordingSKURepo) UpdateSyncFields(item *productdomain.ProductSKU, _ bool) error {
+	return r.Update(item)
 }
 
 // 分类接口报错时，已启用自动同步价格的商品售价必须保持不变。
@@ -146,6 +183,7 @@ func TestSyncProductKeepsPriceWhenCategoryTreeUnavailable(t *testing.T) {
 		skus:        skus,
 		skuMappings: &recordingSKUMappingRepo{},
 	}
+	bindFakeAvailabilityTransaction(svc)
 
 	if err := svc.SyncProduct(1); err != nil {
 		t.Fatalf("category tree failure must not abort the sync, got %v", err)
@@ -178,6 +216,7 @@ func TestSyncProductStillMarksInactiveWhenCategoryTreeUnavailable(t *testing.T) 
 		skus:        &recordingSKURepo{},
 		skuMappings: &recordingSKUMappingRepo{},
 	}
+	bindFakeAvailabilityTransaction(svc)
 
 	if err := svc.SyncProduct(1); err != nil {
 		t.Fatalf("inactive product must be handled even without a category tree, got %v", err)
@@ -215,6 +254,7 @@ func TestSyncProductNewSKUUsesParentCategoryMarkupWhenAutoSyncDisabled(t *testin
 		skus:        skus,
 		skuMappings: &recordingSKUMappingRepo{},
 	}
+	bindFakeAvailabilityTransaction(svc)
 
 	if err := svc.SyncProduct(1); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -265,6 +305,10 @@ func (r *creatingSKURepo) GetByID(_ uint) (*productdomain.ProductSKU, error) {
 	return nil, nil
 }
 
+func (r *creatingSKURepo) SetInactive(_ uint) error { return nil }
+
+func (r *creatingSKURepo) UpdateSyncFields(_ *productdomain.ProductSKU, _ bool) error { return nil }
+
 // recordingSKUMappingRepo 接受新映射写入，不关心内容。
 type recordingSKUMappingRepo struct {
 	mappingcontract.SKUMappingRepository
@@ -277,6 +321,12 @@ func (r *recordingSKUMappingRepo) ListByProductMapping(_ uint) ([]mappingdomain.
 func (r *recordingSKUMappingRepo) Create(_ *mappingdomain.SKUMapping) error {
 	return nil
 }
+
+func (r *recordingSKUMappingRepo) UpdateStockState(_ uint, _ int, _ bool, _ time.Time) error {
+	return nil
+}
+
+func (r *recordingSKUMappingRepo) UpdatePrice(_ uint, _ money.Amount) error { return nil }
 
 // staticProductRepo 返回一个固定的本地商品，供 SyncProduct 走完商品同步阶段。
 type staticProductRepo struct {
@@ -291,6 +341,8 @@ func (staticProductRepo) Update(_ *productdomain.Product) error {
 	return nil
 }
 
+func (staticProductRepo) QuickUpdate(_ string, _ map[string]interface{}) error { return nil }
+
 // recordingMappingRepo 把映射状态更新记录下来。
 type recordingMappingRepo struct {
 	mappingcontract.MappingRepository
@@ -303,6 +355,18 @@ func (r *recordingMappingRepo) GetByID(_ uint) (*mappingdomain.Mapping, error) {
 
 func (r *recordingMappingRepo) Update(item *mappingdomain.Mapping) error {
 	r.mapping = item
+	return nil
+}
+
+func (r *recordingMappingRepo) UpdateSyncState(_ uint, status string, at time.Time) error {
+	r.mapping.UpstreamStatus = status
+	r.mapping.LastSyncedAt = &at
+	return nil
+}
+
+func (r *recordingMappingRepo) UpdateSyncMetadata(_ uint, categoryID uint, fulfillment string) error {
+	r.mapping.UpstreamCategoryID = categoryID
+	r.mapping.UpstreamFulfillmentType = fulfillment
 	return nil
 }
 

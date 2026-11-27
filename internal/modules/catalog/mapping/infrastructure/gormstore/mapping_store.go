@@ -2,6 +2,7 @@ package gormstore
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
@@ -193,4 +194,28 @@ func (r *MappingStore) ListUpstreamIDsByConnection(connectionID uint) ([]uint, e
 		return nil, err
 	}
 	return ids, nil
+}
+
+// UpdateSyncState 保留同步开关，旧快照不能覆盖较新的同步或采购拒绝结果。
+func (r *MappingStore) UpdateSyncState(id uint, status string, at time.Time) error {
+	result := r.db.Model(&mappingdomain.Mapping{}).
+		Where("id = ? AND deleted_at IS NULL AND (last_synced_at IS NULL OR last_synced_at <= ?)", id, at).
+		Updates(map[string]interface{}{"upstream_status": status, "last_synced_at": at})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("mapping %d has newer state or no longer exists", id)
+	}
+	return nil
+}
+
+// UpdateSyncMetadata 仅更新上游元信息，避免旧快照覆盖并发停售与映射开关。
+func (r *MappingStore) UpdateSyncMetadata(id uint, categoryID uint, fulfillment string) error {
+	return r.db.Model(&mappingdomain.Mapping{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]interface{}{
+			"upstream_category_id":      categoryID,
+			"upstream_fulfillment_type": fulfillment,
+		}).Error
 }

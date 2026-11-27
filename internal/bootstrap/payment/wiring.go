@@ -28,7 +28,7 @@ func New(c *container.Container) Handlers {
 		Latest: paymenttransport.NewLatestHandler(
 			guestOrders,
 			userOrders,
-			pendingLookupAdapter{payments: c.PaymentStore},
+			pendingLookupAdapter{payments: c.PaymentStore, service: c.PaymentService},
 		),
 		Write: paymenttransport.NewWriteHandler(
 			guestOrders,
@@ -55,6 +55,6 @@ func New(c *container.Container) Handlers {
 			c.PaymentChannelStore,
 			alerter,
 		),
-		EpayRedirect: paymenttransport.NewEpayRedirectHandler(c.PaymentStore),
+		EpayRedirect: paymenttransport.NewEpayRedirectHandler(pendingLookupAdapter{payments: c.PaymentStore, service: c.PaymentService}),
 	}
 }

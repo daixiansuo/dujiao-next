@@ -121,16 +121,20 @@ func createTestProcurementOrder(t *testing.T, db *gorm.DB, connID, localOrderID 
 	return order
 }
 
-func newTestProcurementService(db *gorm.DB, connections *siteconnectionapp.Service) *procurementapp.Service {
+func newTestProcurementService(db *gorm.DB, connections *siteconnectionapp.Service, reporters ...procurementcontract.UnavailabilityReporter) *procurementapp.Service {
 	orders := ordergormstore.New(db, "test-guest-credential-secret-with-32-bytes")
-	return procurementapp.NewService(procurementapp.Options{
+	options := procurementapp.Options{
 		Repository:      procurementgormstore.New(db),
 		Orders:          procurementorder.New(orders),
 		ProductMappings: procurementmapping.NewProducts(mappinggormstore.NewMappingStore(db)),
 		SKUMappings:     procurementmapping.NewSKUs(mappinggormstore.NewSKUMappingStore(db)),
 		Connections:     procurementupstream.New(connections),
 		OrderLifecycle:  procurementgormstore.NewLifecycle(db, nil, nil, config.EmailConfig{}),
-	})
+	}
+	if len(reporters) > 0 {
+		options.AvailabilityReporter = reporters[0]
+	}
+	return procurementapp.NewService(options)
 }
 
 // 本包的巡检用例会向上游测试服务器发数百次请求，客户端节流会让整个包跑上几分钟。

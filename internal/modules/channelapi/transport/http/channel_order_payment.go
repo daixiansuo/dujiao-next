@@ -217,6 +217,11 @@ func (h *Handler) GetLatestPayment(c *gin.Context) {
 		respondChannelError(c, 404, response.CodeNotFound, "payment_not_found", "error.payment_not_found", nil)
 		return
 	}
+	// 渠道恢复收银台与店面共用核验，不能直接复用历史付款链接。
+	if err := h.PaymentService.CheckPendingPaymentAvailability(c.Request.Context(), order.ID); err != nil {
+		respondChannelPaymentCreateError(c, err)
+		return
+	}
 
 	respondChannelSuccess(c, buildChannelPaymentResponse(order, payment))
 }
@@ -331,7 +336,23 @@ func (h *Handler) GetPaymentDetail(c *gin.Context) {
 		return
 	}
 
-	respondChannelSuccess(c, buildChannelPaymentResponse(order, payment))
+	// 详情查询保留历史支付状态；仅待付且仍有效的记录返回可付款信息。
+	now := time.Now()
+	payable := order.ParentID == nil && order.Status == constants.OrderStatusPendingPayment &&
+		payment.Status == constants.PaymentStatusPending &&
+		(order.ExpiresAt == nil || order.ExpiresAt.After(now)) &&
+		(payment.ExpiredAt == nil || payment.ExpiredAt.After(now)) &&
+		payment.SupersededAt == nil && payment.SupersededByPaymentID == nil
+	view := *payment
+	if payable {
+		if err := h.PaymentService.CheckPendingPaymentAvailability(c.Request.Context(), order.ID); err != nil {
+			respondChannelPaymentCreateError(c, err)
+			return
+		}
+	} else {
+		view.PayURL, view.QRCode, view.ProviderPayload = "", "", nil
+	}
+	respondChannelSuccess(c, buildChannelPaymentResponse(order, &view))
 }
 
 func buildChannelPaymentResponse(order *orderdomain.Order, payment *paymentdomain.Payment) gin.H {

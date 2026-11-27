@@ -11,6 +11,7 @@ import (
 	"github.com/dujiao-next/internal/cache"
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/logger"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	downstreamcallbackdomain "github.com/dujiao-next/internal/modules/downstreamcallback/domain"
 	"github.com/dujiao-next/internal/platform/http/ginutil"
 	"github.com/dujiao-next/internal/shared/jsonmap"
@@ -184,14 +185,24 @@ func (h *Handler) CreateOrder(c *gin.Context) {
 		if _, cancelErr := h.Orders.CancelOrder(order.ID, userID); cancelErr != nil {
 			logger.Warnw("upstream_cancel_unpaid_order_failed", "order_id", order.ID, "error", cancelErr)
 		}
+		// 保留可恢复的业务码，且不向下游透传数据库错误或上游原始响应。
+		failureCode, failureMessage := "payment_failed", "wallet payment failed"
+		switch {
+		case errors.Is(payErr, mappingcontract.ErrUpstreamStockInsufficient):
+			failureCode, failureMessage = "product_out_of_stock", "product stock is insufficient"
+		case errors.Is(payErr, mappingcontract.ErrUpstreamCheckFailed):
+			failureCode, failureMessage = "upstream_check_failed", "product availability could not be verified, retry later"
+		case errors.Is(payErr, mappingcontract.ErrUpstreamProductNotFound), errors.Is(payErr, mappingcontract.ErrMappingNotFound), errors.Is(payErr, mappingcontract.ErrMappingInactive):
+			failureCode, failureMessage = "product_unavailable", "product is not available"
+		}
 		// 钱包余额不足或支付失败，返回 200 + ok:false 让 A 站正确解析错误码
 		c.JSON(http.StatusOK, gin.H{
 			"ok":            false,
 			"order_id":      order.ID,
 			"order_no":      order.OrderNo,
 			"status":        constants.OrderStatusCanceled,
-			"error_code":    "payment_failed",
-			"error_message": fmt.Sprintf("wallet payment failed: %s", payErr.Error()),
+			"error_code":    failureCode,
+			"error_message": failureMessage,
 		})
 		return
 	}
@@ -355,10 +366,14 @@ func mapOrderErrorToResponse(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrWalletInsufficient):
 		errorResponse(c, http.StatusPaymentRequired, "insufficient_balance", "wallet balance is insufficient")
+	case errors.Is(err, mappingcontract.ErrUpstreamStockInsufficient):
+		errorResponse(c, http.StatusConflict, "product_out_of_stock", "product stock is insufficient")
 	case errors.Is(err, ErrStockInsufficient):
 		errorResponse(c, http.StatusConflict, "insufficient_stock", "product stock is insufficient")
-	case errors.Is(err, ErrProductUnavailable):
+	case errors.Is(err, ErrProductUnavailable), errors.Is(err, mappingcontract.ErrUpstreamProductNotFound), errors.Is(err, mappingcontract.ErrMappingNotFound), errors.Is(err, mappingcontract.ErrMappingInactive):
 		errorResponse(c, http.StatusBadRequest, "product_unavailable", "product is not available")
+	case errors.Is(err, mappingcontract.ErrUpstreamCheckFailed):
+		errorResponse(c, http.StatusServiceUnavailable, "upstream_check_failed", "product availability could not be verified, retry later")
 	case errors.Is(err, ErrSKUUnavailable):
 		errorResponse(c, http.StatusBadRequest, "sku_unavailable", "sku is invalid or not available")
 	case errors.Is(err, ErrInvalidOrderItem):

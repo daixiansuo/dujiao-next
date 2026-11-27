@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 
 	"github.com/dujiao-next/internal/i18n"
@@ -332,6 +333,11 @@ var guestOrderCreateExtraErrorRules = []mappedError{
 }
 
 var userOrderCommonErrorRules = []mappedError{
+	{target: mappingcontract.ErrUpstreamStockInsufficient, code: response.CodeBadRequest, key: "error.upstream_stock_insufficient"},
+	{target: mappingcontract.ErrUpstreamCheckFailed, code: response.CodeBadRequest, key: "error.upstream_check_failed"},
+	{target: mappingcontract.ErrUpstreamProductNotFound, code: response.CodeBadRequest, key: "error.product_not_available"},
+	{target: mappingcontract.ErrMappingNotFound, code: response.CodeBadRequest, key: "error.product_not_available"},
+	{target: mappingcontract.ErrMappingInactive, code: response.CodeBadRequest, key: "error.product_not_available"},
 	{target: ErrProductSKURequired, code: response.CodeBadRequest, key: "error.order_item_invalid"},
 	{target: productcontract.ErrProductSKUInvalid, code: response.CodeBadRequest, key: "error.order_item_invalid"},
 	{target: productdomain.ErrPurchaseQuantityInvalid, code: response.CodeBadRequest, key: "error.order_item_invalid"},
@@ -376,6 +382,11 @@ var userOrderPreviewExtraErrorRules = []mappedError{
 }
 
 var guestOrderCommonErrorRules = []mappedError{
+	{target: mappingcontract.ErrUpstreamStockInsufficient, code: response.CodeBadRequest, key: "error.upstream_stock_insufficient"},
+	{target: mappingcontract.ErrUpstreamCheckFailed, code: response.CodeBadRequest, key: "error.upstream_check_failed"},
+	{target: mappingcontract.ErrUpstreamProductNotFound, code: response.CodeBadRequest, key: "error.product_not_available"},
+	{target: mappingcontract.ErrMappingNotFound, code: response.CodeBadRequest, key: "error.product_not_available"},
+	{target: mappingcontract.ErrMappingInactive, code: response.CodeBadRequest, key: "error.product_not_available"},
 	{target: ErrProductSKURequired, code: response.CodeBadRequest, key: "error.order_item_invalid"},
 	{target: productcontract.ErrProductSKUInvalid, code: response.CodeBadRequest, key: "error.order_item_invalid"},
 	{target: ErrGuestEmailRequired, code: response.CodeBadRequest, key: "error.guest_email_required"},

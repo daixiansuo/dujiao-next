@@ -18,10 +18,11 @@ import (
 var (
 	// ErrUpstreamProductDeleted 上游商品已被软删除（不再存在）
 	ErrUpstreamProductDeleted = errors.New("upstream product deleted")
-	// ErrUpstreamProductUnavailable 上游商品已下架（仍然存在但不可购）
-	// 旧版上游对下架商品返回 product_unavailable，新版改为 200 + is_active=false；
-	// 此错误仅作为旧版兼容兜底使用。
+	// ErrUpstreamProductUnavailable 上游商品当前不可售，包括下架、无法区分删除与下架
+	// 的 product_not_found，以及商品详情接口的无业务错误码 404。
 	ErrUpstreamProductUnavailable = errors.New("upstream product unavailable")
+	// ErrUpstreamInvalidResponse 表示缺少可售状态、库存等必要信息，不能据此改变停售状态。
+	ErrUpstreamInvalidResponse = errors.New("invalid upstream response")
 	// ErrUpstreamCancelNotAllowed 上游拒绝取消订单（如订单已付款），重试也不会成功
 	ErrUpstreamCancelNotAllowed = errors.New("upstream order cannot be canceled")
 )

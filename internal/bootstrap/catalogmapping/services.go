@@ -118,3 +118,19 @@ func (unit *unitOfWork) WithinTransaction(fn func(mappingcontract.ImportReposito
 		})
 	})
 }
+
+// WithinAvailabilityTransaction 为停售绑定全部仓储，禁止事务内再访问全局连接。
+func (unit *unitOfWork) WithinAvailabilityTransaction(fn func(mappingcontract.AvailabilityRepositories) error) error {
+	if unit == nil || unit.products == nil || unit.skus == nil || unit.mappings == nil || unit.skuMappings == nil {
+		return errors.New("availability transaction repositories are required")
+	}
+	return unit.products.Transaction(func(tx *gorm.DB) error {
+		skus, skuOK := unit.skus.BindTx(tx).(mappingcontract.AvailabilitySKURepository)
+		mappings, mappingOK := unit.mappings.BindTx(tx).(mappingcontract.AvailabilityMappingRepository)
+		skuMappings, stockOK := unit.skuMappings.BindTx(tx).(mappingcontract.AvailabilitySKUMappingRepository)
+		if !skuOK || !mappingOK || !stockOK {
+			return errors.New("availability transaction writers are required")
+		}
+		return fn(mappingcontract.AvailabilityRepositories{Products: unit.products.BindTx(tx), SKUs: skus, Mappings: mappings, SKUMappings: skuMappings})
+	})
+}

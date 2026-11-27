@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/dujiao-next/internal/constants"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 	downstreamcallbackdomain "github.com/dujiao-next/internal/modules/downstreamcallback/domain"
 	memberlevelapp "github.com/dujiao-next/internal/modules/memberlevel/application"
@@ -478,5 +480,72 @@ func TestCreateOrderStopsBeforePaymentWhenRefCreateFails(t *testing.T) {
 	}
 	if payments.calls.Load() != 0 || orders.canceled != 1 {
 		t.Fatalf("want 0 payments and 1 canceled order, got %d payments and %d canceled", payments.calls.Load(), orders.canceled)
+	}
+}
+
+func TestMapUpstreamPurchaseErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{mappingcontract.ErrUpstreamStockInsufficient, http.StatusConflict, "product_out_of_stock"},
+		{mappingcontract.ErrUpstreamProductNotFound, http.StatusBadRequest, "product_unavailable"},
+		{mappingcontract.ErrMappingInactive, http.StatusBadRequest, "product_unavailable"},
+		{mappingcontract.ErrUpstreamCheckFailed, http.StatusServiceUnavailable, "upstream_check_failed"},
+	} {
+		t.Run(tc.code+tc.err.Error(), func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			mapOrderErrorToResponse(ctx, fmt.Errorf("%w: private-provider-response", tc.err))
+			var body struct {
+				ErrorCode string `json:"error_code"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != tc.status || body.ErrorCode != tc.code || strings.Contains(recorder.Body.String(), "private-provider-response") {
+				t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+type blockedUpstreamPayments struct{ err error }
+
+func (s blockedUpstreamPayments) CreatePayment(CreatePaymentInput) (*CreatePaymentResult, error) {
+	return nil, s.err
+}
+
+func TestUpstreamWalletPaymentReportsAvailabilityFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{mappingcontract.ErrUpstreamStockInsufficient, "product_out_of_stock"},
+		{mappingcontract.ErrUpstreamProductNotFound, "product_unavailable"},
+		{mappingcontract.ErrUpstreamCheckFailed, "upstream_check_failed"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			orders := &idempotencyOrders{}
+			handler := &Handler{Dependencies: Dependencies{
+				ProductRepository: formTestProducts{productdomain.Product{ID: 18, IsActive: true, FulfillmentType: constants.FulfillmentTypeUpstream}},
+				SKUs:              formTestSKUs{}, Orders: orders, Payments: blockedUpstreamPayments{fmt.Errorf("%w: private-provider-response", tc.err)},
+				DownstreamRefs: &idempotencyRefs{refs: map[string]*downstreamcallbackdomain.OrderRef{}}, Settings: formTestSettings{},
+			}}
+			recorder := postDownstreamOrder(handler, "")
+			var body struct {
+				Ok        bool   `json:"ok"`
+				ErrorCode string `json:"error_code"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusOK || body.Ok || body.ErrorCode != tc.code || orders.canceled != 1 || strings.Contains(recorder.Body.String(), "private-provider-response") {
+				t.Fatalf("unexpected availability failure: canceled=%d status=%d body=%s", orders.canceled, recorder.Code, recorder.Body.String())
+			}
+		})
 	}
 }

@@ -2,6 +2,10 @@ package gormstore
 
 import (
 	"testing"
+	"time"
+
+	"github.com/dujiao-next/internal/shared/money"
+	"github.com/shopspring/decimal"
 
 	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 )
@@ -59,5 +63,31 @@ func TestSKUMappingStoreDeleteHidesRowsAndPersistsMarker(t *testing.T) {
 	}
 	if persisted.DeletedAt == nil {
 		t.Fatal("DeleteByProductMapping must persist deleted_at")
+	}
+}
+
+func TestSKUMappingPriceWritesCannotUndoNewerStop(t *testing.T) {
+	_, store, _ := setupMappingStoreTest(t)
+	item := &mappingdomain.SKUMapping{ProductMappingID: 1, LocalSKUID: 10, UpstreamSKUID: 20, UpstreamStock: 99, UpstreamIsActive: true}
+	if err := store.Create(item); err != nil {
+		t.Fatal(err)
+	}
+	stoppedAt := time.Now().UTC()
+	if err := store.UpdateStockState(item.ID, 0, false, stoppedAt); err != nil {
+		t.Fatal(err)
+	}
+	price := money.FromDecimal(decimal.NewFromInt(12))
+	if err := store.UpdatePrice(item.ID, price); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateStockState(item.ID, 99, true, stoppedAt.Add(-time.Second)); err == nil {
+		t.Fatal("stale stock must not overwrite newer stop")
+	}
+	got, err := store.GetByLocalSKUID(item.LocalSKUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UpstreamIsActive || got.UpstreamStock != 0 || !got.StockSyncedAt.Equal(stoppedAt) || !got.UpstreamPrice.Equal(price.Decimal) {
+		t.Fatalf("price sync overwrote newer stop: %+v", got)
 	}
 }

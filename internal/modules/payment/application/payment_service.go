@@ -5,6 +5,7 @@ import (
 
 	"github.com/dujiao-next/internal/config"
 	"github.com/dujiao-next/internal/logger"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 	externalidentitycontract "github.com/dujiao-next/internal/modules/identity/externalidentity/contract"
 	usercontract "github.com/dujiao-next/internal/modules/identity/user/contract"
@@ -51,6 +52,7 @@ type PaymentService struct {
 	orderRepo               ordercontract.Store
 	productRepo             productcontract.Repository
 	productSKURepo          productcontract.SKURepository
+	upstreamPurchaseChecker mappingcontract.PurchaseChecker
 	paymentRepo             paymentcontract.Store
 	channelRepo             paymentcontract.ChannelStore
 	walletRepo              walletcontract.Repository

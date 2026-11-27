@@ -1,10 +1,13 @@
 package channelhttp
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	externalidentitydomain "github.com/dujiao-next/internal/modules/identity/externalidentity/domain"
 	userdomain "github.com/dujiao-next/internal/modules/identity/user/domain"
 	paymentdomain "github.com/dujiao-next/internal/modules/payment/domain"
@@ -644,5 +647,120 @@ func TestGetPaymentChannelsFiltersByUserEligibility(t *testing.T) {
 		if len(payload.Data.Items) != 1 || payload.Data.Items[0].ID != 1 {
 			t.Fatalf("%s: expected only eligible channel 1, got %+v", query, payload.Data.Items)
 		}
+	}
+}
+
+type pendingChannelOrderStub struct {
+	Orders
+	order *orderdomain.Order
+}
+
+func (s pendingChannelOrderStub) GetOrderByUser(uint, uint) (*orderdomain.Order, error) {
+	return s.order, nil
+}
+
+type pendingChannelStoreStub struct{ payment *paymentdomain.Payment }
+
+func (s pendingChannelStoreStub) GetLatestPendingByOrder(uint, time.Time) (*paymentdomain.Payment, error) {
+	return s.payment, nil
+}
+func (s pendingChannelStoreStub) GetByID(uint) (*paymentdomain.Payment, error) { return s.payment, nil }
+
+type pendingChannelCheckerStub struct {
+	Payments
+	err    error
+	checks int
+}
+
+func (s *pendingChannelCheckerStub) CheckPendingPaymentAvailability(context.Context, uint) error {
+	s.checks++
+	return s.err
+}
+
+func TestChannelPendingPaymentReadChecksAvailability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, detail := range []bool{false, true} {
+		for _, tc := range []struct {
+			err  error
+			code string
+		}{
+			{nil, ""},
+			{mappingcontract.ErrUpstreamProductNotFound, "product_unavailable"},
+			{mappingcontract.ErrUpstreamStockInsufficient, "sku_out_of_stock"},
+			{mappingcontract.ErrUpstreamCheckFailed, "upstream_check_failed"},
+		} {
+			t.Run(fmt.Sprintf("detail_%t_%s", detail, tc.code), func(t *testing.T) {
+				order := &orderdomain.Order{ID: 1, UserID: 7, Status: constants.OrderStatusPendingPayment}
+				payment := &paymentdomain.Payment{ID: 2, OrderID: 1, Status: constants.PaymentStatusPending, PayURL: "https://pay.example/pending", QRCode: "pending-qr"}
+				checker := &pendingChannelCheckerStub{err: tc.err}
+				handler := &Handler{Dependencies: Dependencies{UserAuthService: paymentChannelsIdentityStub{}, OrderService: pendingChannelOrderStub{order: order}, PaymentService: checker, PaymentStore: pendingChannelStoreStub{payment}}}
+				recorder := httptest.NewRecorder()
+				ctx, _ := gin.CreateTestContext(recorder)
+				ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/channel/payments/latest?order_id=1&channel_user_id=7", nil)
+				ctx.Params = gin.Params{{Key: "id", Value: "2"}}
+				if detail {
+					handler.GetPaymentDetail(ctx)
+				} else {
+					handler.GetLatestPayment(ctx)
+				}
+				var body struct {
+					ErrorCode string `json:"error_code"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if checker.checks != 1 || body.ErrorCode != tc.code {
+					t.Fatalf("checks=%d code=%s body=%s", checker.checks, body.ErrorCode, recorder.Body.String())
+				}
+				hasLink := strings.Contains(recorder.Body.String(), "https://pay.example/pending")
+				if (tc.err == nil) != hasLink || (tc.err != nil && strings.Contains(recorder.Body.String(), "pending-qr")) {
+					t.Fatalf("unverified payment details: %s", recorder.Body.String())
+				}
+			})
+		}
+	}
+}
+
+func TestChannelHistoricalPaymentDetailsRemainQueryableWithoutLinks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, orderStatus, paymentStatus string
+		expired                          bool
+	}{
+		{"paid", constants.OrderStatusPaid, constants.PaymentStatusSuccess, false},
+		{"failed", constants.OrderStatusPendingPayment, constants.PaymentStatusFailed, false},
+		{"closed", constants.OrderStatusCanceled, constants.PaymentStatusPending, false},
+		{"expired", constants.OrderStatusPendingPayment, constants.PaymentStatusPending, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			order := &orderdomain.Order{ID: 1, UserID: 7, Status: tc.orderStatus}
+			payment := &paymentdomain.Payment{ID: 2, OrderID: 1, Status: tc.paymentStatus, PayURL: "https://pay.example/old", QRCode: "old-qr", ProviderType: constants.PaymentProviderBepusdt, InteractionMode: constants.PaymentInteractionQR, ProviderPayload: jsonmap.JSON{"data": map[string]interface{}{"token": "old-wallet", "actual_amount": "3.00"}}}
+			if tc.expired {
+				past := time.Now().Add(-time.Minute)
+				payment.ExpiredAt = &past
+			}
+			checker := &pendingChannelCheckerStub{err: mappingcontract.ErrUpstreamCheckFailed}
+			handler := &Handler{Dependencies: Dependencies{UserAuthService: paymentChannelsIdentityStub{}, OrderService: pendingChannelOrderStub{order: order}, PaymentService: checker, PaymentStore: pendingChannelStoreStub{payment}}}
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/channel/payments/2?channel_user_id=7", nil)
+			ctx.Params = gin.Params{{Key: "id", Value: "2"}}
+			handler.GetPaymentDetail(ctx)
+			var body struct {
+				ErrorCode string `json:"error_code"`
+				Data      struct {
+					Status string `json:"status"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusOK || body.ErrorCode != "" || body.Data.Status != tc.paymentStatus || checker.checks != 0 || strings.Contains(recorder.Body.String(), "https://pay.example/old") || strings.Contains(recorder.Body.String(), "old-qr") || strings.Contains(recorder.Body.String(), "old-wallet") {
+				t.Fatalf("history query changed: checks=%d body=%s", checker.checks, recorder.Body.String())
+			}
+			if payment.PayURL != "https://pay.example/old" || payment.ProviderPayload == nil {
+				t.Fatal("read mutated payment state")
+			}
+		})
 	}
 }

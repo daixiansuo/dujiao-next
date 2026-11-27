@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 
 	"github.com/dujiao-next/internal/constants"
@@ -209,16 +210,43 @@ func (h *Handler) GetProduct(c *gin.Context) {
 // applyUpstreamStockToProducts 为 upstream 类型商品的 SKU 填充上游库存数据
 // 从 SKU 映射中读取 UpstreamStock，写入 ProductSKU 的虚拟字段，供 computeSKUStock 使用
 func (h *Handler) applyUpstreamStockToProducts(products []productdomain.Product) {
+	// 同时校验商品映射和 SKU 映射，避免把已停用映射的旧库存继续输出给下游。
+	productIDs := make([]uint, 0, len(products))
+	for i := range products {
+		if products[i].FulfillmentType == constants.FulfillmentTypeUpstream {
+			productIDs = append(productIDs, products[i].ID)
+		}
+	}
+	mappingByProduct := make(map[uint]mappingdomain.Mapping)
+	if len(productIDs) > 0 && h.ProductMappings != nil {
+		mappings, err := h.ProductMappings.ListByLocalProductIDs(productIDs)
+		if err == nil {
+			for _, mapping := range mappings {
+				mappingByProduct[mapping.LocalProductID] = mapping
+			}
+		} else {
+			logger.Warnw("upstream_product_mapping_lookup_failed", "error", err)
+		}
+	}
 	for i := range products {
 		p := &products[i]
 		if p.FulfillmentType != constants.FulfillmentTypeUpstream {
 			continue
 		}
+		productMapping, exists := mappingByProduct[p.ID]
+		available := exists && p.IsActive && productMapping.IsActive &&
+			productMapping.UpstreamStatus != mappingdomain.UpstreamStatusInactive && productMapping.UpstreamStatus != mappingdomain.UpstreamStatusDeleted
+		if !available {
+			p.IsActive = false
+		}
 		for j := range p.SKUs {
 			sku := &p.SKUs[j]
+			sku.UpstreamStock = 0
+			if !available || !sku.IsActive || h.SKUMappings == nil {
+				continue
+			}
 			mapping, err := h.SKUMappings.GetByLocalSKUID(sku.ID)
-			if err != nil || mapping == nil {
-				sku.UpstreamStock = 0
+			if err != nil || mapping == nil || mapping.ProductMappingID != productMapping.ID || !mapping.UpstreamIsActive || mapping.UpstreamStock < -1 {
 				continue
 			}
 			sku.UpstreamStock = mapping.UpstreamStock

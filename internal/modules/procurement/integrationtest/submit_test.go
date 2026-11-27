@@ -1,6 +1,7 @@
 package procurement_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,6 +16,102 @@ import (
 	procurementcontract "github.com/dujiao-next/internal/modules/procurement/contract"
 	siteconnectionapp "github.com/dujiao-next/internal/modules/siteconnection/application"
 )
+
+type recordingAvailabilityReporter struct {
+	productID uint
+	skuID     uint
+	code      string
+	calls     int
+	err       error
+}
+
+func (r *recordingAvailabilityReporter) ReportUpstreamUnavailable(_ context.Context, productID, skuID uint, code string) error {
+	r.productID, r.skuID, r.code = productID, skuID, code
+	r.calls++
+	return r.err
+}
+
+// 采购的结构化拒绝必须联动停售，同时保留原拒绝状态和告警处理。
+func TestSubmitToUpstreamReportsUnavailableProductsAndSKUs(t *testing.T) {
+	for _, code := range []string{
+		"product_deleted", "product_not_found", "product_unavailable",
+		"sku_deleted", "sku_not_found", "sku_unavailable", "product_out_of_stock", "sku_out_of_stock", "insufficient_stock",
+		"insufficient_balance", "unauthorized", "forbidden", "server_error",
+	} {
+		t.Run(code, func(t *testing.T) {
+			db := setupProcurementTestDB(t)
+			order := createProcTestOrder(t, db, "PROC-REPORT-"+code, constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+			mapping := &mappingdomain.SKUMapping{ProductMappingID: 1, LocalSKUID: 1, UpstreamSKUID: 201, UpstreamIsActive: true}
+			if err := db.Create(mapping).Error; err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": code, "error_message": "upstream rejection"})
+			}))
+			defer server.Close()
+			connections := newTestSiteConnectionService(db, "test-key", t.TempDir())
+			connection, err := connections.Create(siteconnectionapp.CreateInput{
+				Name: "test", BaseURL: server.URL, ApiKey: "key", ApiSecret: "secret", Protocol: constants.ConnectionProtocolDujiaoNext,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			proc := createTestProcurementOrder(t, db, connection.ID, order.ID, order.OrderNo, "pending")
+			reporter := &recordingAvailabilityReporter{}
+			service := newTestProcurementService(db, connections, reporter)
+			_ = service.SubmitToUpstream(proc.ID)
+			var updated ProcurementOrder
+			if err := db.First(&updated, proc.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			shouldReport := code != "insufficient_balance" && code != "unauthorized" && code != "forbidden" && code != "server_error"
+			if shouldReport {
+				if reporter.calls != 1 || reporter.productID != 1 || reporter.skuID != 1 || reporter.code != code {
+					t.Fatalf("unexpected availability report: %+v", reporter)
+				}
+				if updated.Status != constants.ProcurementStatusRejected || updated.RetryCount != 0 {
+					t.Fatalf("explicit unavailable must reject without retry, got status=%s retries=%d", updated.Status, updated.RetryCount)
+				}
+			} else if reporter.calls != 0 {
+				t.Fatalf("connection/temporary failure must not mark product unavailable: %+v", reporter)
+			}
+		})
+	}
+}
+
+func TestSubmitToUpstreamAvailabilityWriteFailureStillRejectsProcurement(t *testing.T) {
+	db := setupProcurementTestDB(t)
+	order := createProcTestOrder(t, db, "PROC-REPORT-FAIL", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	if err := db.Create(&mappingdomain.SKUMapping{ProductMappingID: 1, LocalSKUID: 1, UpstreamSKUID: 201}).Error; err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": "product_unavailable"})
+	}))
+	defer server.Close()
+	connections := newTestSiteConnectionService(db, "test-key", t.TempDir())
+	connection, err := connections.Create(siteconnectionapp.CreateInput{Name: "test", BaseURL: server.URL, ApiKey: "key", ApiSecret: "secret", Protocol: constants.ConnectionProtocolDujiaoNext})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := createTestProcurementOrder(t, db, connection.ID, order.ID, order.OrderNo, "pending")
+	writeFailure := errors.New("availability write failed")
+	service := newTestProcurementService(db, connections, &recordingAvailabilityReporter{err: writeFailure})
+	if err := service.SubmitToUpstream(proc.ID); !errors.Is(err, writeFailure) {
+		t.Fatalf("must preserve availability write failure, got %v", err)
+	}
+	var updated ProcurementOrder
+	if err := db.First(&updated, proc.ID).Error; err != nil || updated.Status != constants.ProcurementStatusRejected {
+		t.Fatalf("procurement must still reject: status=%s error=%v", updated.Status, err)
+	}
+	var updatedOrder orderdomain.Order
+	if err := db.First(&updatedOrder, order.ID).Error; err != nil || updatedOrder.Status != constants.OrderStatusPaid {
+		t.Fatalf("original failure handling must still run: status=%s error=%v", updatedOrder.Status, err)
+	}
+}
 
 // ── SubmitToUpstream tests ──
 

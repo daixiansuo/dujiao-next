@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	paymentpresenter "github.com/dujiao-next/internal/modules/payment/transport/presenter"
 
 	paymentdomain "github.com/dujiao-next/internal/modules/payment/domain"
@@ -336,6 +337,11 @@ var paymentProviderGatewayErrorRules = []mappedError{
 
 var paymentCreateErrorRules = concatMappedErrors(
 	[]mappedError{
+		{target: mappingcontract.ErrUpstreamStockInsufficient, code: response.CodeBadRequest, key: "error.upstream_stock_insufficient"},
+		{target: mappingcontract.ErrUpstreamCheckFailed, code: response.CodeBadRequest, key: "error.upstream_check_failed"},
+		{target: mappingcontract.ErrUpstreamProductNotFound, code: response.CodeBadRequest, key: "error.product_not_available"},
+		{target: mappingcontract.ErrMappingNotFound, code: response.CodeBadRequest, key: "error.product_not_available"},
+		{target: mappingcontract.ErrMappingInactive, code: response.CodeBadRequest, key: "error.product_not_available"},
 		{target: ErrPaymentInvalid, code: response.CodeBadRequest, key: "error.payment_invalid"},
 		{target: ErrOrderNotFound, code: response.CodeNotFound, key: "error.order_not_found"},
 		{target: ErrOrderStatusInvalid, code: response.CodeBadRequest, key: "error.order_status_invalid"},

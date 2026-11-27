@@ -201,6 +201,7 @@ type Orders interface {
 }
 
 type Payments interface {
+	CheckPendingPaymentAvailability(context.Context, uint) error
 	GetWalletRechargeChannels() ([]paymentdomain.PaymentChannel, error)
 	ListChannels(filter PaymentChannelListFilter) ([]paymentdomain.PaymentChannel, int64, error)
 	GetAllowedChannelsForProducts(productIDs []uint) ([]paymentdomain.PaymentChannel, error)

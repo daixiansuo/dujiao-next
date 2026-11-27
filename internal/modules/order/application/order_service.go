@@ -1,11 +1,15 @@
 package application
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	affiliatedomain "github.com/dujiao-next/internal/modules/affiliate/domain"
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 	couponcontract "github.com/dujiao-next/internal/modules/coupon/contract"
@@ -51,6 +55,7 @@ type OrderService struct {
 	resellerAccounting      resellerAccountingTransactions
 	riskControlSvc          orderriskcontract.Controller
 	productMappingService   upstreamStockEnsurer
+	upstreamPurchaseChecker mappingcontract.PurchaseChecker
 	expireMinutes           int
 }
 
@@ -436,6 +441,11 @@ func (s *OrderService) createOrder(input orderCreateParams) (*orderdomain.Order,
 		return nil, err
 	}
 
+	// 实时核验在事务和计价之前执行，避免旧库存放行，也避免预览触发远端查询。
+	if err := s.checkUpstreamCreateItems(input.Items); err != nil {
+		return nil, err
+	}
+
 	result, err := s.buildOrderResult(input)
 	if err != nil {
 		return nil, err
@@ -546,6 +556,10 @@ func (s *OrderService) createOrder(input orderCreateParams) (*orderdomain.Order,
 	err = s.orderStore.WithinTransaction(func(tx ordercontract.Transaction) error {
 		orderStore := tx.Orders()
 		productSKURepo := tx.ProductSKUs()
+		// 远端核验期间可能已被并发停售，事务内使用同一事务句柄重新确认。
+		if err := validateUpstreamPlansInTx(result.Plans, tx); err != nil {
+			return err
+		}
 		if s.riskControlSvc != nil && !input.SkipRiskControl {
 			if err := s.riskControlSvc.CheckPendingOrderAllowed(buildRiskCheckInput(input, false), input.RiskCheckResult, orderStore); err != nil {
 				return err
@@ -805,6 +819,77 @@ func validateGuestPassword(password string) error {
 	}
 	if len([]rune(password)) < guestPasswordMinLength {
 		return ErrGuestPasswordTooShort
+	}
+	return nil
+}
+
+// SetUpstreamPurchaseChecker 注入正式下单的批量可售核验；预览只使用本地状态。
+func (s *OrderService) SetUpstreamPurchaseChecker(checker mappingcontract.PurchaseChecker) {
+	if s != nil {
+		s.upstreamPurchaseChecker = checker
+	}
+}
+
+// checkUpstreamCreateItems 在开启写事务前核验全部上游规格，查询失败不得继续创建订单。
+func (s *OrderService) checkUpstreamCreateItems(items []CreateOrderItem) error {
+	merged, err := mergeCreateOrderItems(items)
+	if err != nil {
+		return err
+	}
+	var purchases []mappingcontract.PurchaseItem
+	for _, item := range merged {
+		product, err := s.productRepo.GetByID(strconv.FormatUint(uint64(item.ProductID), 10))
+		if err != nil {
+			return err
+		}
+		if product == nil || !product.IsActive {
+			return ErrProductNotAvailable
+		}
+		if product.FulfillmentType != constants.FulfillmentTypeUpstream {
+			continue
+		}
+		sku, err := resolveProductOrderSKU(s.productSKURepo, product, item.SKUID)
+		if err != nil {
+			return err
+		}
+		purchases = append(purchases, mappingcontract.PurchaseItem{LocalSKUID: sku.ID, Quantity: item.Quantity})
+	}
+	if len(purchases) == 0 {
+		return nil
+	}
+	if s.upstreamPurchaseChecker == nil {
+		logger.Errorw("order_upstream_checker_missing", "items", len(purchases))
+		return mappingcontract.ErrUpstreamCheckFailed
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.upstreamPurchaseChecker.CheckUpstreamPurchasable(ctx, purchases); err != nil {
+		logger.Warnw("order_upstream_purchase_check_failed", "items", len(purchases), "error", err)
+		return err
+	}
+	return nil
+}
+
+// validateUpstreamPlansInTx 使用事务内最新状态，防止远端核验后并发停售仍创建订单。
+func validateUpstreamPlansInTx(plans []childOrderPlan, tx ordercontract.Transaction) error {
+	for _, plan := range plans {
+		if plan.Item.FulfillmentType != constants.FulfillmentTypeUpstream {
+			continue
+		}
+		product, err := tx.Products().GetByID(strconv.FormatUint(uint64(plan.Item.ProductID), 10))
+		if err != nil {
+			return fmt.Errorf("%w: %v", mappingcontract.ErrUpstreamCheckFailed, err)
+		}
+		if product == nil || !product.IsActive || product.FulfillmentType != constants.FulfillmentTypeUpstream {
+			return mappingcontract.ErrUpstreamProductNotFound
+		}
+		sku, err := tx.ProductSKUs().GetByID(plan.Item.SKUID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", mappingcontract.ErrUpstreamCheckFailed, err)
+		}
+		if sku == nil || !sku.IsActive || sku.ProductID != product.ID {
+			return mappingcontract.ErrUpstreamProductNotFound
+		}
 	}
 	return nil
 }

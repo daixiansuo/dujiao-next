@@ -1,6 +1,7 @@
 package paymenthttp
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -39,6 +40,7 @@ type UserOrderLookup interface {
 // PendingPaymentLookup 待支付记录查询端口。
 type PendingPaymentLookup interface {
 	GetLatestPendingByOrder(orderID uint, now time.Time) (*paymentdomain.Payment, error)
+	CheckPendingPaymentAvailability(context.Context, uint) error
 }
 
 // LatestGuestPaymentQuery 游客最新待支付查询参数。
@@ -144,6 +146,11 @@ func (h *LatestHandler) respondLatestPayment(c *gin.Context, order *orderdomain.
 	}
 	if payment == nil {
 		ginutil.RespondError(c, response.CodeNotFound, "error.payment_not_found", nil)
+		return
+	}
+	// 恢复旧链接也是再次进入收银台，必须复用付款前核验，不能绕过最新停售状态。
+	if err := h.payments.CheckPendingPaymentAvailability(c.Request.Context(), order.ID); err != nil {
+		respondPaymentCreateError(c, err)
 		return
 	}
 
