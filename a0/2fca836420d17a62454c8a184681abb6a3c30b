@@ -1,0 +1,25 @@
+frontend/user/src/templates/atelier/components/AtelierProductCard.vue
+  s_4f573a8a225bd6::t_da731b776e5f35 215-216
+  s_4f573a8a225bd6::t_382b5139f03b65 202-203,229
+  s_4f573a8a225bd6::t_7a53f4247fb160 67,70,73,77,206,209,211,220,244
+  s_4f573a8a225bd6::t_1aa2f7dd0aa855 66,82-86
+openspec/specs/storefront-customization/spec.md
+  s_4f573a8a225bd6::t_7a53f4247fb160 79
+  s_4f573a8a225bd6::t_1aa2f7dd0aa855 83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20261123",
+  "base_commit_sha": "a02fca836420d17a62454c8a184681abb6a3c30b",
+  "prompts": {},
+  "sessions": {
+    "s_4f573a8a225bd6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21d42-f8fc-7801-bb71-d78bef82a949",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
