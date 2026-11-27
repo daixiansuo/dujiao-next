@@ -63,8 +63,8 @@
       <span class="truncate">{{ getStockStatusLabel(product) }}</span>
     </span>
 
-    <!-- 价格 -->
-    <div class="flex shrink-0 flex-col items-end tabular-nums">
+    <!-- 价格优惠归入价格区，小屏也保留价签；售罄仍由状态区展示。 -->
+    <div class="flex min-w-0 shrink-0 flex-col items-end tabular-nums">
       <span
         v-if="price.discounted"
         class="theme-price-original text-[11px] leading-tight"
@@ -76,6 +76,13 @@
         <span v-if="siteCurrency" class="mr-1 font-sans text-[11px] font-semibold text-muted-foreground">{{ siteCurrency }}</span>
         <b class="text-[16px] font-bold leading-none tracking-tight">{{ priceParts.int }}</b>
         <span v-if="priceParts.dec" class="text-[12px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
+      </span>
+      <span
+        v-if="!soldOut && deal"
+        class="mt-1 inline-flex max-w-full items-center rounded-[5px] border px-1.5 py-0.5 text-right text-[10.5px] font-semibold leading-tight whitespace-normal break-words"
+        :class="deal.chipClass"
+      >
+        {{ deal.label }}
       </span>
     </div>
 
@@ -207,6 +214,13 @@
           </span>
           <b class="text-[19px] font-extrabold leading-none tracking-[-0.03em]">{{ priceParts.int }}</b>
           <span v-if="priceParts.dec" class="text-[12.5px] font-semibold opacity-70">.{{ priceParts.dec }}</span>
+        </span>
+        <span
+          v-if="!soldOut && deal"
+          class="mt-1 inline-flex max-w-full self-start items-center rounded-[5px] border px-1.5 py-0.5 text-[10.5px] font-semibold leading-tight whitespace-normal break-words"
+          :class="deal.chipClass"
+        >
+          {{ deal.label }}
         </span>
       </div>
 
@@ -343,12 +357,13 @@ const deal = computed(() => {
   return null
 })
 
+// 商品信息区只保留售罄状态；会员、促销和批发标签跟随价格展示。
 const flag = computed(() => (soldOut.value
   ? {
       label: t('products.stockStatus.outOfStock'),
       chipClass: 'border-border bg-secondary text-muted-foreground',
     }
-  : deal.value))
+  : null))
 
 const stock = computed(() => ({
   low_stock: { text: 'text-warning', dot: 'bg-warning' },
