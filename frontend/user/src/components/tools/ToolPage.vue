@@ -6,12 +6,14 @@ import { getActiveTemplate } from '../../templates/registry'
 
 defineProps<{ title: string; description: string; detail?: boolean }>()
 const { t } = useI18n()
-const isVault = computed(() => getActiveTemplate() === 'vault')
+const activeTemplate = computed(() => getActiveTemplate())
+const isVault = computed(() => activeTemplate.value === 'vault')
+const isAtelier = computed(() => activeTemplate.value === 'atelier')
 </script>
 
 <template>
-  <div class="min-h-[70vh] pb-16 text-foreground" :class="isVault ? 'pt-8' : 'pt-28'">
-    <div class="mx-auto max-w-5xl px-4 sm:px-6">
+  <div class="min-h-[70vh] pb-16 text-foreground" :class="isVault ? 'pt-8' : isAtelier ? 'pt-[88px]' : 'pt-28'">
+    <div class="mx-auto px-4 sm:px-6" :class="isAtelier ? 'max-w-[1240px]' : 'max-w-5xl'">
       <router-link
         v-if="detail"
         to="/tools"

@@ -135,13 +135,13 @@ func testConnectionMarkupMigration(t *testing.T, db *gorm.DB) {
 		t.Fatal(err)
 	}
 	// Recreate the pre-feature schema with existing percentage configuration.
-	for _, column := range []string{"price_markup_mode", "price_markup_amount", "price_markup_threshold"} {
+	for _, column := range []string{"price_markup_mode", "price_markup_amount"} {
 		if err := db.Migrator().DropColumn(&siteconnectiondomain.Connection{}, column); err != nil {
 			t.Fatal(err)
 		}
 	}
 	legacy := &siteconnectiondomain.Connection{Name: "legacy", BaseURL: "https://example.com", ApiKey: "key", ApiSecret: "encrypted", ExchangeRate: decimal.RequireFromString("7.2"), PriceMarkupPercent: decimal.NewFromInt(40)}
-	if err := db.Omit("PriceMarkupMode", "PriceMarkupAmount", "PriceMarkupThreshold").Create(legacy).Error; err != nil {
+	if err := db.Omit("PriceMarkupMode", "PriceMarkupAmount").Create(legacy).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&siteconnectiondomain.Connection{}); err != nil {
@@ -152,16 +152,12 @@ func testConnectionMarkupMigration(t *testing.T, db *gorm.DB) {
 	if err != nil || conn == nil {
 		t.Fatalf("get migrated connection: %v, %+v", err, conn)
 	}
-	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupPercent || !conn.PriceMarkupAmount.IsZero() || !conn.PriceMarkupThreshold.IsZero() || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) || !conn.ExchangeRate.Equal(legacy.ExchangeRate) {
+	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupPercent || !conn.PriceMarkupAmount.IsZero() || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) || !conn.ExchangeRate.Equal(legacy.ExchangeRate) {
 		t.Fatalf("migration lost pricing: %+v", conn)
 	}
 	conn.PriceMarkupMode = constants.ConnectionPriceMarkupFixedAmount
 	conn.PriceMarkupAmount = money.FromDecimal(decimal.RequireFromString("3.25"))
 	if err := store.Update(conn); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate upgrading an existing fixed-mode connection from before segmented markup.
-	if err := db.Migrator().DropColumn(&siteconnectiondomain.Connection{}, "price_markup_threshold"); err != nil {
 		t.Fatal(err)
 	}
 	// Startup migration is repeatable and preserves both active and inactive values.
@@ -173,29 +169,27 @@ func testConnectionMarkupMigration(t *testing.T, db *gorm.DB) {
 		t.Fatalf("list: %v, %d, %+v", err, total, rows)
 	}
 	conn = &rows[0]
-	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupFixedAmount || conn.PriceMarkupAmount.String() != "3.25" || !conn.PriceMarkupThreshold.IsZero() || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) {
+	if conn.PriceMarkupMode != constants.ConnectionPriceMarkupFixedAmount || conn.PriceMarkupAmount.String() != "3.25" || !conn.PriceMarkupPercent.Equal(decimal.NewFromInt(40)) {
 		t.Fatalf("save/list lost pricing: %+v", conn)
 	}
-	conn.PriceMarkupMode = constants.ConnectionPriceMarkupSegmented
-	conn.PriceMarkupThreshold = money.FromDecimal(decimal.NewFromInt(15))
-	conn.PriceMarkupAmount = money.FromDecimal(decimal.NewFromInt(5))
-	conn.PriceMarkupPercent = decimal.NewFromInt(30)
-	if err := store.Update(conn); err != nil {
+	// 已部署的旧列保留原值，自动迁移不应删列或转换旧模式。
+	if err := db.Exec("ALTER TABLE site_connections ADD COLUMN price_markup_threshold decimal(20,2) NOT NULL DEFAULT 0").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(conn).Updates(map[string]any{"price_markup_mode": "segmented", "price_markup_threshold": 15}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&siteconnectiondomain.Connection{}); err != nil {
 		t.Fatal(err)
 	}
-	reread, err := store.GetByID(conn.ID)
-	if err != nil || reread == nil || reread.PriceMarkupMode != constants.ConnectionPriceMarkupSegmented || reread.PriceMarkupThreshold.String() != "15.00" || reread.PriceMarkupAmount.String() != "5.00" || !reread.PriceMarkupPercent.Equal(decimal.NewFromInt(30)) {
-		t.Fatalf("segmented migration/save lost pricing: %v, %+v", err, reread)
+	var stored struct {
+		Mode      string
+		Threshold string
 	}
-	conn.PriceMarkupAmount = money.FromDecimal(decimal.Zero)
-	if err := store.Update(conn); err != nil {
+	if err := db.Raw("SELECT price_markup_mode AS mode, CAST(price_markup_threshold AS TEXT) AS threshold FROM site_connections WHERE id = ?", conn.ID).Scan(&stored).Error; err != nil {
 		t.Fatal(err)
 	}
-	reread, err = store.GetByID(conn.ID)
-	if err != nil || reread == nil || !reread.PriceMarkupAmount.IsZero() || reread.PriceMarkupThreshold.String() != "15.00" {
-		t.Fatalf("zero not persisted: %v, %+v", err, reread)
+	if stored.Mode != "segmented" || (stored.Threshold != "15" && stored.Threshold != "15.00") {
+		t.Fatalf("旧配置被擅自转换: %+v", stored)
 	}
 }

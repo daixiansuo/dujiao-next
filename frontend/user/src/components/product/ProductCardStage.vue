@@ -10,6 +10,7 @@ const props = defineProps<{
   alt: string
 }>()
 
+const emit = defineEmits<{ imageError: [] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
 const brandName = computed(() => String(appStore.config?.brand?.site_name || '').trim() || 'IDID')
@@ -19,7 +20,7 @@ watch(() => props.src, () => { paused.value = false })
 </script>
 
 <template>
-  <div class="card-stage" :style="cardSurface" :class="{ 'is-paused': paused }" role="group" :aria-label="alt">
+  <div class="card-stage" :style="cardSurface" :class="{ 'is-paused': paused }" role="group" :aria-label="alt" @error.capture="emit('imageError')">
     <div :key="src" class="card-float">
       <div class="card-rotate">
         <div v-for="depth in [-1, 0, 1]" :key="depth" class="card-edge" :style="{ transform: `translateZ(${depth}px)` }" aria-hidden="true"></div>

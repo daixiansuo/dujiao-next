@@ -32,7 +32,7 @@ const product = (id: number): AdminProduct => ({
   purchase_type: 'guest', min_purchase_quantity: 1, max_purchase_quantity: 0,
   stock_display_mode: 'exact', fulfillment_type: 'manual', manual_form_schema: null,
   manual_stock_total: 10, manual_stock_locked: 0, manual_stock_sold: 0,
-  payment_channel_ids: '', is_affiliate_enabled: false,
+  payment_channel_ids: '', affiliate_rate_percent: 0,
   auto_stock_available: 0, auto_stock_total: 0, auto_stock_locked: 0, auto_stock_sold: 0,
   is_mapped: false, is_active: true, sort_order: 0, created_at: '', updated_at: '',
 })

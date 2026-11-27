@@ -140,10 +140,12 @@ const (
 
 // 钱包充值状态常量
 const (
-	WalletRechargeStatusPending = "pending"
-	WalletRechargeStatusSuccess = "success"
-	WalletRechargeStatusFailed  = "failed"
-	WalletRechargeStatusExpired = "expired"
+	WalletRechargeStatusPending           = "pending"
+	WalletRechargeStatusSuccess           = "success"
+	WalletRechargeStatusFailed            = "failed"
+	WalletRechargeStatusExpired           = "expired"
+	WalletRechargeStatusPartiallyRefunded = "partially_refunded"
+	WalletRechargeStatusRefunded          = "refunded"
 )
 
 // 推广返利状态常量
@@ -381,6 +383,7 @@ const (
 const (
 	QueueDefault                    = "default"
 	TaskOrderStatusEmail            = "order:status_email"
+	TaskWalletRechargeRefundEmail   = "wallet:recharge_refund_email"
 	TaskOrderAutoFulfill            = "order:auto_fulfill"
 	TaskOrderTimeoutCancel          = "order:timeout_cancel"
 	TaskWalletRechargeExpire        = "wallet_recharge:timeout_expire"
@@ -439,7 +442,6 @@ const (
 const (
 	ConnectionPriceMarkupPercent     = "percent"
 	ConnectionPriceMarkupFixedAmount = "fixed_amount"
-	ConnectionPriceMarkupSegmented   = "segmented"
 )
 
 // API 凭证状态常量
@@ -540,6 +542,7 @@ const (
 const (
 	StorefrontTemplateClassic = "classic"
 	StorefrontTemplateVault   = "vault"
+	StorefrontTemplateAtelier = "atelier"
 	StorefrontTemplateDefault = StorefrontTemplateClassic
 )
 

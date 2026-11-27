@@ -20,7 +20,11 @@ frontend/*/*.local
 internal/web/dist/
 
 # Agents 配置
-.agents/
+# 仅版本管理本项目的 OpenSpec 官方工作流技能。
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/openspec-*/
 skills-lock.json
 
 # 本地生成的素材、教程草稿及导出文件

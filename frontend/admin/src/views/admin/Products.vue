@@ -58,6 +58,8 @@ const batchOperating = ref(false)
 const batchCategoryId = ref('')
 const batchStockDisplayMode = ref('')
 const stockDisplayModes = ['exact', 'status', 'range', 'hidden']
+const batchPurchaseType = ref('')
+const purchaseTypes = ['member', 'guest']
 
 interface BatchImageFailure {
   id: number
@@ -150,6 +152,13 @@ const handleBatchStockDisplay = async () => {
   if (!ids.length || !batchStockDisplayMode.value) return
   await runBatch(ids, (ids) => adminAPI.batchUpdateProductStockDisplay(ids, batchStockDisplayMode.value), 'admin.products.batch.stockDisplayResult')
   batchStockDisplayMode.value = ''
+}
+
+const handleBatchPurchaseType = async () => {
+  const ids = Array.from(selectedIds.value)
+  if (!ids.length || !batchPurchaseType.value) return
+  await runBatch(ids, (ids) => adminAPI.batchUpdateProductPurchaseType(ids, batchPurchaseType.value), 'admin.products.batch.purchaseTypeResult')
+  batchPurchaseType.value = ''
 }
 
 const handleBatchDelete = async () => {
@@ -257,6 +266,27 @@ const fulfillmentTypeBadgeClass = (product: AdminProduct) => {
   return product?.fulfillment_type === 'auto'
     ? 'border-violet-200 bg-violet-50 text-violet-700'
     : 'border-amber-200 bg-amber-50 text-amber-700'
+}
+
+// 返利比例：null/缺省 = 继承全站，0 = 不参与，其余为商品级自定义比例。
+const resolveAffiliateRate = (product: AdminProduct): number | null => {
+  const raw = product?.affiliate_rate_percent
+  if (raw === null || raw === undefined || raw === '') return null
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
+}
+
+const affiliateBadgeClass = (product: AdminProduct) => {
+  const rate = resolveAffiliateRate(product)
+  if (rate === null || rate === 0) return 'border-border bg-muted/30 text-muted-foreground'
+  return 'border-sky-200 bg-sky-50 text-sky-700'
+}
+
+const affiliateBadgeText = (product: AdminProduct) => {
+  const rate = resolveAffiliateRate(product)
+  if (rate === null) return t('admin.products.affiliate.inherit')
+  if (rate === 0) return t('admin.products.affiliate.disabled')
+  return t('admin.products.affiliate.custom', { rate })
 }
 
 const manualStockBadgeClass = (product: AdminProduct) => {
@@ -658,6 +688,15 @@ watch(
           <Button size="sm" variant="outline" :disabled="batchOperating || !batchStockDisplayMode" @click="handleBatchStockDisplay">{{ t('admin.products.batch.applyStockDisplay') }}</Button>
         </div>
         <Button size="sm" variant="outline" :disabled="batchOperating" @click="openBatchImages">{{ t('admin.products.batch.images') }}</Button>
+        <div class="flex items-center gap-1">
+          <Select v-model="batchPurchaseType">
+            <SelectTrigger class="h-8 w-[140px] text-xs"><SelectValue :placeholder="t('admin.products.batch.purchaseTypePlaceholder')" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="type in purchaseTypes" :key="type" :value="type">{{ t(`admin.products.purchaseType.${type}`) }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" :disabled="batchOperating || !batchPurchaseType" @click="handleBatchPurchaseType">{{ t('admin.products.batch.applyPurchaseType') }}</Button>
+        </div>
         <Button size="sm" variant="destructive" :disabled="batchOperating" @click="handleBatchDelete">{{ t('admin.products.batch.delete') }}</Button>
       </div>
       <button class="ml-auto text-xs text-muted-foreground hover:text-foreground" @click="selectedIds = new Set()">{{ t('admin.products.batch.clearSelection') }}</button>
@@ -719,9 +758,9 @@ watch(
                     </span>
                     <span
                       class="rounded-full border px-2 py-0.5 text-[11px]"
-                      :class="product.is_affiliate_enabled ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-border bg-muted/30 text-muted-foreground'"
+                      :class="affiliateBadgeClass(product)"
                     >
-                      {{ product.is_affiliate_enabled ? t('admin.products.affiliate.enabled') : t('admin.products.affiliate.disabled') }}
+                      {{ affiliateBadgeText(product) }}
                     </span>
                     <span
                       v-if="product.fulfillment_type === 'manual'"

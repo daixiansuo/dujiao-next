@@ -159,6 +159,10 @@ func (h *AdminHandler) ImportUpstreamProduct(c *gin.Context) {
 			ginutil.RespondError(c, response.CodeBadRequest, "error.mapping_already_exists", nil)
 			return
 		}
+		if errors.Is(err, siteconnectioncontract.ErrInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.connection_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return
@@ -173,6 +177,10 @@ func (h *AdminHandler) ImportUpstreamProduct(c *gin.Context) {
 		}
 		if errors.Is(err, productcontract.ErrProductCategoryInvalid) {
 			ginutil.RespondError(c, response.CodeBadRequest, "error.product_category_invalid", nil)
+			return
+		}
+		if errors.Is(err, mappingcontract.ErrUpstreamProductNoCategory) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.mapping_upstream_no_category", nil)
 			return
 		}
 		ginutil.RespondError(c, response.CodeInternal, "error.mapping_import_failed", err)
@@ -212,6 +220,10 @@ func (h *AdminHandler) BatchImportUpstreamProducts(c *gin.Context) {
 		req.AutoCreateCategory,
 	)
 	if err != nil {
+		if errors.Is(err, siteconnectioncontract.ErrInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.connection_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return
@@ -395,6 +407,10 @@ func (h *AdminHandler) ListUpstreamProducts(c *gin.Context) {
 
 	result, err := h.service.ListUpstreamProducts(connectionID, page, pageSize)
 	if err != nil {
+		if errors.Is(err, siteconnectioncontract.ErrInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.connection_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return
@@ -426,6 +442,10 @@ func (h *AdminHandler) ListUpstreamCategories(c *gin.Context) {
 
 	categories, supported, err := h.service.ListUpstreamCategories(connectionID)
 	if err != nil {
+		if errors.Is(err, siteconnectioncontract.ErrInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.connection_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return
@@ -450,6 +470,10 @@ func (h *AdminHandler) ListUpstreamCategoryCounts(c *gin.Context) {
 
 	counts, total, err := h.service.ListUpstreamCategoryCounts(c.Request.Context(), connectionID)
 	if err != nil {
+		if errors.Is(err, siteconnectioncontract.ErrInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.connection_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return
@@ -467,7 +491,7 @@ func (h *AdminHandler) ListUpstreamCategoryCounts(c *gin.Context) {
 // BatchImportByCategoryRequest 按分类批量导入请求
 type BatchImportByCategoryRequest struct {
 	ConnectionID       uint `json:"connection_id" binding:"required"`
-	UpstreamCategoryID uint `json:"upstream_category_id" binding:"required"`
+	UpstreamCategoryID uint `json:"upstream_category_id"` // 0 表示上游「未分类」商品
 	AutoCreateCategory bool `json:"auto_create_category"`
 	LocalCategoryID    uint `json:"local_category_id"`
 }
@@ -491,12 +515,20 @@ func (h *AdminHandler) BatchImportByCategory(c *gin.Context) {
 			ginutil.RespondError(c, response.CodeBadRequest, "error.category_parent_invalid", nil)
 			return
 		}
+		if errors.Is(err, siteconnectioncontract.ErrInvalid) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.connection_invalid", nil)
+			return
+		}
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
 			return
 		}
 		if errors.Is(err, mappingcontract.ErrBatchImportInProgress) {
 			ginutil.RespondError(c, response.CodeBadRequest, "error.mapping_batch_import_in_progress", nil)
+			return
+		}
+		if errors.Is(err, mappingcontract.ErrUpstreamProductNoCategory) {
+			ginutil.RespondError(c, response.CodeBadRequest, "error.mapping_upstream_no_category", nil)
 			return
 		}
 		ginutil.RespondError(c, response.CodeInternal, "error.category_import_failed", err)

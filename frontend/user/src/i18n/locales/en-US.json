@@ -1,74 +1,5 @@
 {
-  "tools": {
-    "title": "Toolbox",
-    "backToTools": "Back to toolbox",
-    "description": "Generate verification codes and process text instantly, without signing in.",
-    "localBadge": "Processed in your browser",
-    "privacy": "This tool does not upload your secret or text, or save your input in browser storage. Input is cleared when you leave the page.",
-    "open": "Open tool",
-    "clear": "Clear",
-    "copied": "Copied",
-    "copyFailed": "Could not copy. Please select and copy the text manually.",
-    "totp": {
-      "title": "2FA Code Generator",
-      "description": "Enter a Base32 secret or otpauth link to generate a 6-digit code that refreshes every 30 seconds.",
-      "inputLabel": "Secret or otpauth link",
-      "inputHint": "Letters are case-insensitive. Spaces and hyphens in the secret are ignored.",
-      "placeholder": "Paste a Base32 secret or otpauth://totp/… link",
-      "codeLabel": "Current code",
-      "remaining": "Refreshes in {seconds}s",
-      "countdown": "Code validity remaining",
-      "waiting": "Enter a valid secret to display a code",
-      "copy": "Copy code",
-      "compatibility": "Supports SHA-1, 6-digit, 30-second TOTP. Uses the site’s corrected time when available. If a code does not match, check your device clock and the original service’s settings. This tool does not change your IDID account’s two-factor settings.",
-      "errors": {
-        "invalidSecret": "Invalid secret. Check that you have the complete Base32 secret.",
-        "invalidUri": "Invalid otpauth link. Check for missing or duplicate secret and parameters.",
-        "unsupportedType": "Only time-based TOTP codes are supported. Counter-based HOTP is not supported.",
-        "unsupportedParameters": "Only SHA1, 6 digits and a 30-second period are supported. Check the link parameters.",
-        "unavailable": "Secure cryptography is unavailable. Open this page over HTTPS in a recent browser.",
-        "generationFailed": "Could not generate a code. Check Web Crypto support and enter the secret again."
-      }
-    },
-    "text": {
-      "title": "Text Tools",
-      "description": "Convert delimiters to newlines, find and replace, deduplicate lines, trim whitespace, or reverse characters within each line.",
-      "inputLabel": "Input text",
-      "outputLabel": "Result",
-      "inputPlaceholder": "Paste the text you want to process here",
-      "outputPlaceholder": "Select an operation and click “Process text”",
-      "outputHint": "The result stays until the next operation. Use it as input to continue processing.",
-      "operationLabel": "Choose an operation",
-      "operations": {
-        "split": "Delimiter to newline",
-        "replace": "Find and replace",
-        "deduplicate": "Deduplicate lines",
-        "trim": "Trim each line",
-        "reverse": "Reverse characters per line"
-      },
-      "hints": {
-        "split": "Replace every literal occurrence of the delimiter with a newline.",
-        "replace": "Replace all literal matches. Regular expressions are not used.",
-        "deduplicate": "Remove exact duplicate lines, keeping their first occurrence and preserving whitespace.",
-        "trim": "Remove leading and trailing whitespace on each line. Preserve interior whitespace and blank lines.",
-        "reverse": "Reverse characters within each line, keeping line order and combined emoji and characters intact."
-      },
-      "delimiterLabel": "Delimiter",
-      "delimiterPlaceholder": "For example: a comma, semicolon or ----",
-      "searchLabel": "Find",
-      "replacementLabel": "Replace with",
-      "replacementHint": "Leave empty to delete matches.",
-      "run": "Process text",
-      "copy": "Copy result",
-      "useOutput": "Use result as input",
-      "errors": {
-        "emptyDelimiter": "Enter a delimiter first.",
-        "emptySearch": "Enter the text to find first."
-      }
-    }
-  },
   "common": {
-    "close": "Close",
     "siteName": "Dujiao-Next",
     "loading": "Loading...",
     "error": "Error",
@@ -95,7 +26,8 @@
       "serviceUnavailable": "Service unavailable",
       "networkError": "Network connection failed",
       "timeout": "Request timed out. Please try again."
-    }
+    },
+    "close": "Close"
   },
   "errorBoundary": {
     "retry": "Retry",
@@ -145,6 +77,33 @@
       "payWechat": "WeChat"
     }
   },
+  "atelier": {
+    "trustAuto": "24/7 automated instant delivery",
+    "autoShort": "Auto Delivery",
+    "manualShort": "Manual Delivery",
+    "buyShort": "Buy",
+    "quickSearch": "Quick Search",
+    "heroSubtitle": "Search by keyword or pick a category to inspect live stock and variants.",
+    "viewCard": "Cards",
+    "viewTable": "Table",
+    "catalogHeading": "All Products",
+    "receiptTitle": "Order Summary",
+    "receiptReady": "READY",
+    "receiptUnavailable": "UNAVAILABLE",
+    "receiptProduct": "Product",
+    "receiptSku": "Variant",
+    "receiptDelivery": "Delivery",
+    "receiptUnitQty": "Unit × Qty",
+    "receiptSubtotal": "Estimated Total",
+    "stepSku": "Select Variant",
+    "stepQty": "Configure Quantity",
+    "stepDetail": "Specifications & Details",
+    "changelogTag": "UPDATES",
+    "assurance": {
+      "autoDesc": "Automatically delivered upon payment",
+      "manualDesc": "Verified & delivered promptly"
+    }
+  },
   "breadcrumb": {
     "label": "Breadcrumb",
     "back": "Back to {name}"
@@ -173,8 +132,8 @@
     "terms": "Terms of Service",
     "privacy": "Privacy Policy",
     "email": "Email",
-    "x": "X",
-    "supportUrl": "Support"
+    "supportUrl": "Support",
+    "x": "X"
   },
   "notFoundPage": {
     "title": "Page Not Found",
@@ -198,9 +157,9 @@
     },
     "featured": {
       "title": "Featured Products",
-      "description": "Discover our premium collection of digital assets, curated for excellence.",
       "empty": "No products available",
-      "viewAll": "View All Products"
+      "viewAll": "View All Products",
+      "description": "Discover our premium collection of digital assets, curated for excellence."
     },
     "cta": {
       "title": "Ready to Start?",
@@ -213,9 +172,6 @@
     }
   },
   "products": {
-    "browseCategories": "Browse categories",
-    "toggleCategory": "Expand or collapse {name}",
-    "subtitle": "Browse our featured products",
     "priceAria": "Price {price}",
     "promotionPriceAria": "Promotional price {price}",
     "originalPriceAria": "Original price {price}",
@@ -260,13 +216,12 @@
     "promotionBadge": "Promo",
     "searchBoxPlaceholder": "Search products by name or keyword...",
     "viewDetails": "View Details",
-    "quickBuy": "Buy"
+    "quickBuy": "Buy",
+    "browseCategories": "Browse categories",
+    "toggleCategory": "Expand or collapse {name}",
+    "subtitle": "Browse our featured products"
   },
   "productDetail": {
-    "cardMotion": {
-      "pause": "Pause card animation",
-      "resume": "Resume card animation"
-    },
     "description": "Description",
     "details": "Details",
     "quantity": "Quantity",
@@ -277,8 +232,12 @@
     "deliveryReassuranceManual": "After payment, your order is handled manually. Progress and results are posted to the order page and your email.",
     "loginToBuy": "Login to buy",
     "addToCart": "Add to cart",
+    "copyAffiliateLink": "Copy affiliate link",
+    "copyAffiliateLinkSuccess": "Affiliate link copied",
+    "copyAffiliateLinkFailed": "Copy failed, please copy it manually",
+    "affiliateRateHint": "Earn {rate}% commission by promoting this product",
+    "affiliateRateNone": "This product is not eligible for affiliate commission",
     "buyNow": "Buy now",
-    "categoryLabel": "Category",
     "fulfillmentLabel": "Fulfillment",
     "skuTitle": "Choose SKU",
     "skuRequired": "Please select a SKU before purchase",
@@ -296,7 +255,12 @@
     "addCartStockExceeded": "Insufficient stock for this SKU. You can purchase up to {count}",
     "addCartStockExceededWithCart": "Insufficient stock for this SKU. You can purchase up to {count} ({cartCount} already in cart)",
     "addCartLimitExceeded": "This product can be purchased up to {count} per order",
-    "addCartLimitExceededWithCart": "This product can be purchased up to {count} per order ({cartCount} already in cart)"
+    "addCartLimitExceededWithCart": "This product can be purchased up to {count} per order ({cartCount} already in cart)",
+    "cardMotion": {
+      "pause": "Pause card animation",
+      "resume": "Resume card animation"
+    },
+    "categoryLabel": "Category"
   },
   "quickBuy": {
     "title": "Quick Buy",
@@ -315,15 +279,15 @@
     "guest": "Guest purchase"
   },
   "blog": {
-    "categoryLabel": "Category",
-    "allCategories": "All",
     "subtitle": "Latest articles and updates",
     "readMore": "Read More",
     "empty": "No articles",
     "searchPlaceholder": "Search article title...",
     "searchClear": "Clear",
     "noResults": "No articles match your search",
-    "relatedProducts": "Related Products"
+    "relatedProducts": "Related Products",
+    "categoryLabel": "Category",
+    "allCategories": "All"
   },
   "blogDetail": {
     "backToBlog": "Back to list",
@@ -395,6 +359,14 @@
       "recentOrdersTitle": "Recent orders",
       "viewAllOrders": "View all orders",
       "emptyOrders": "No recent orders"
+    },
+    "exclusivePrice": {
+      "title": "My exclusive prices",
+      "hint": "These products have a fixed price set just for you; it applies at checkout when it is lower than the regular and member prices",
+      "unavailable": "Product is off the shelf or unavailable",
+      "total": "{n} in total",
+      "showAll": "Show all ({n})",
+      "collapse": "Collapse"
     },
     "memberLevel": {
       "currentLevel": "Current Level",
@@ -626,6 +598,8 @@
       "rechargeStatus": {
         "pending": "Pending",
         "success": "Credited",
+        "partially_refunded": "Partially Refunded",
+        "refunded": "Refunded",
         "failed": "Failed",
         "expired": "Expired"
       },
@@ -666,6 +640,7 @@
       "affiliateCode": "Affiliate ID",
       "copyPromotionUrl": "Copy URL",
       "copySuccess": "Promotion URL copied",
+      "disabledNotice": "Your affiliate access has been disabled: no new commissions will be earned and withdrawals are paused. Please contact support if you have questions.",
       "conversionRate": "Conversion Rate",
       "conversionDetail": "Clicks {clicks} · Valid Orders {orders}",
       "pendingCommission": "Pending Commission",
@@ -1818,5 +1793,73 @@
     "authInvalid": "Credentials mismatch, please try again",
     "authSubmit": "Save and search",
     "authClear": "Clear saved info"
+  },
+  "tools": {
+    "title": "Toolbox",
+    "backToTools": "Back to toolbox",
+    "description": "Generate verification codes and process text instantly, without signing in.",
+    "localBadge": "Processed in your browser",
+    "privacy": "This tool does not upload your secret or text, or save your input in browser storage. Input is cleared when you leave the page.",
+    "open": "Open tool",
+    "clear": "Clear",
+    "copied": "Copied",
+    "copyFailed": "Could not copy. Please select and copy the text manually.",
+    "totp": {
+      "title": "2FA Code Generator",
+      "description": "Enter a Base32 secret or otpauth link to generate a 6-digit code that refreshes every 30 seconds.",
+      "inputLabel": "Secret or otpauth link",
+      "inputHint": "Letters are case-insensitive. Spaces and hyphens in the secret are ignored.",
+      "placeholder": "Paste a Base32 secret or otpauth://totp/… link",
+      "codeLabel": "Current code",
+      "remaining": "Refreshes in {seconds}s",
+      "countdown": "Code validity remaining",
+      "waiting": "Enter a valid secret to display a code",
+      "copy": "Copy code",
+      "compatibility": "Supports SHA-1, 6-digit, 30-second TOTP. Uses the site’s corrected time when available. If a code does not match, check your device clock and the original service’s settings. This tool does not change your IDID account’s two-factor settings.",
+      "errors": {
+        "invalidSecret": "Invalid secret. Check that you have the complete Base32 secret.",
+        "invalidUri": "Invalid otpauth link. Check for missing or duplicate secret and parameters.",
+        "unsupportedType": "Only time-based TOTP codes are supported. Counter-based HOTP is not supported.",
+        "unsupportedParameters": "Only SHA1, 6 digits and a 30-second period are supported. Check the link parameters.",
+        "unavailable": "Secure cryptography is unavailable. Open this page over HTTPS in a recent browser.",
+        "generationFailed": "Could not generate a code. Check Web Crypto support and enter the secret again."
+      }
+    },
+    "text": {
+      "title": "Text Tools",
+      "description": "Convert delimiters to newlines, find and replace, deduplicate lines, trim whitespace, or reverse characters within each line.",
+      "inputLabel": "Input text",
+      "outputLabel": "Result",
+      "inputPlaceholder": "Paste the text you want to process here",
+      "outputPlaceholder": "Select an operation and click “Process text”",
+      "outputHint": "The result stays until the next operation. Use it as input to continue processing.",
+      "operationLabel": "Choose an operation",
+      "operations": {
+        "split": "Delimiter to newline",
+        "replace": "Find and replace",
+        "deduplicate": "Deduplicate lines",
+        "trim": "Trim each line",
+        "reverse": "Reverse characters per line"
+      },
+      "hints": {
+        "split": "Replace every literal occurrence of the delimiter with a newline.",
+        "replace": "Replace all literal matches. Regular expressions are not used.",
+        "deduplicate": "Remove exact duplicate lines, keeping their first occurrence and preserving whitespace.",
+        "trim": "Remove leading and trailing whitespace on each line. Preserve interior whitespace and blank lines.",
+        "reverse": "Reverse characters within each line, keeping line order and combined emoji and characters intact."
+      },
+      "delimiterLabel": "Delimiter",
+      "delimiterPlaceholder": "For example: a comma, semicolon or ----",
+      "searchLabel": "Find",
+      "replacementLabel": "Replace with",
+      "replacementHint": "Leave empty to delete matches.",
+      "run": "Process text",
+      "copy": "Copy result",
+      "useOutput": "Use result as input",
+      "errors": {
+        "emptyDelimiter": "Enter a delimiter first.",
+        "emptySearch": "Enter the text to find first."
+      }
+    }
   }
 }

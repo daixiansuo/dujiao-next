@@ -18,6 +18,33 @@ import (
 	"github.com/dujiao-next/internal/upstream"
 )
 
+// upstreamBatchScanMinIDs 按 ID 批量导入时，选中商品达到这个数量才考虑整站扫描。
+// 是否真的扫描还要看上游规模：见 shouldScanUpstreamProducts。
+const upstreamBatchScanMinIDs = 50
+
+// shouldScanUpstreamProducts 判断整站扫描是否比逐个 GetProduct 更省请求。
+// 先取第一页拿到 total 和上游实际的 page_size，估算扫描需要的页数：
+// 需要的页数不少于选中数量时就不扫：请求数打平时逐个取下载的数据少得多
+// （大型上游上选 50 个扫全站反而更慢）。
+// 拿不到 total（旧上游）时保持旧行为——选中够多就扫。
+func shouldScanUpstreamProducts(adapter upstream.Adapter, selected int) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := adapter.ListProducts(ctx, upstream.ListProductsOpts{
+		Page:     1,
+		PageSize: upstreamProductPageSize,
+	})
+	if err != nil || result == nil || result.Total <= 0 {
+		return true
+	}
+	pageSize := result.PageSize
+	if pageSize <= 0 {
+		pageSize = upstreamProductPageSize
+	}
+	pagesNeeded := (result.Total + pageSize - 1) / pageSize
+	return pagesNeeded < selected
+}
+
 // acquireBatchImportLock 同一连接同时只允许一个批量导入：大批量导入常超过 HTTP 超时，
 // 管理员重试时后台仍在跑上一批，并发导入会产生重复商品。
 func acquireBatchImportLock(connectionID uint) (func(), error) {
@@ -59,31 +86,63 @@ func (s *Service) BatchImportUpstreamProducts(
 	}
 	defer release()
 
+	conn, err := s.connections.GetByID(connectionID)
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		return nil, siteconnectioncontract.ErrNotFound
+	}
+	if !supportedPriceMarkupMode(conn) {
+		return nil, siteconnectioncontract.ErrInvalid
+	}
+
+	// 需要上游分类树的两种情况，都只在整批开始前拉一次：
+	//   1. 开自动创建分类（要给每个商品找到/建本地分类）；
+	//   2. 连接配了分类加价（要按分类算价，含父分类继承）。
+	// 否则每个商品都会各自 ListCategories 一次，200 个商品就是 200 次请求。
+	adapter, err := s.connections.GetAdapter(conn)
+	if err != nil {
+		return nil, err
+	}
+	needCatMap := (autoCreateCategory && categoryID == 0) || usesCategoryMarkup(conn)
 	var catMap map[uint]upstream.UpstreamCategory
-	if autoCreateCategory && categoryID == 0 {
-		conn, err := s.connections.GetByID(connectionID)
-		if err != nil {
-			return nil, err
-		}
-		if conn == nil {
-			return nil, siteconnectioncontract.ErrNotFound
-		}
-		adapter, err := s.connections.GetAdapter(conn)
-		if err != nil {
-			return nil, err
-		}
+	if needCatMap {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		fetched, fetchErr := s.fetchUpstreamCategoryMap(ctx, adapter)
 		if fetchErr != nil {
+			// 配了分类加价时拿不到分类树就不能算价，整批拒绝比写入错价安全。
 			return nil, fmt.Errorf("prefetch upstream categories: %w", fetchErr)
 		}
 		catMap = fetched
 	}
 
+	// 一次选中很多商品时，先比较「整站扫描」和「逐个 GetProduct」谁的请求更少：
+	// 扫描需要 ceil(total/page_size) 次，逐个取需要选中数量次。商品多的上游上
+	// 选中 50 个就扫全站反而更慢，所以按第一页的 total/page_size 决定。
+	// 扫描失败或某个 ID 不在结果里时，回退到逐个 GetProduct，行为与之前一致。
+	scanned := map[uint]upstream.UpstreamProduct{}
+	if len(upstreamProductIDs) >= upstreamBatchScanMinIDs && shouldScanUpstreamProducts(adapter, len(upstreamProductIDs)) {
+		if allProducts, scanErr := listAllUpstreamProducts(context.Background(), adapter); scanErr == nil {
+			for _, p := range allProducts {
+				scanned[p.ID] = p
+			}
+		}
+	}
+
 	outcomes := make([]BatchUpstreamProductImportOutcome, 0, len(upstreamProductIDs))
 	for _, id := range upstreamProductIDs {
-		mapping, importErr := s.importUpstreamProduct(connectionID, id, categoryID, "", autoCreateCategory, catMap)
+		var mapping *mappingdomain.Mapping
+		var importErr error
+		if p, ok := scanned[id]; ok {
+			if importErr = s.ensureNoMapping(connectionID, id); importErr == nil {
+				product := p
+				mapping, importErr = s.importUpstreamProductData(connectionID, conn, adapter, &product, categoryID, "", autoCreateCategory, catMap)
+			}
+		} else {
+			mapping, importErr = s.importUpstreamProduct(connectionID, id, categoryID, "", autoCreateCategory, catMap)
+		}
 		outcomes = append(outcomes, BatchUpstreamProductImportOutcome{
 			UpstreamProductID: id,
 			Mapping:           mapping,
@@ -124,10 +183,18 @@ func (s *Service) BatchImportByCategory(
 	if conn == nil {
 		return nil, siteconnectioncontract.ErrNotFound
 	}
+	if !supportedPriceMarkupMode(conn) {
+		return nil, siteconnectioncontract.ErrInvalid
+	}
 
 	adapter, err := s.connections.GetAdapter(conn)
 	if err != nil {
 		return nil, err
+	}
+
+	// 上游「未分类」商品没有分类可供自动创建，必须由管理员指定本地分类
+	if autoCreateCategory && localCategoryID == 0 && upstreamCategoryID == 0 {
+		return nil, mappingcontract.ErrUpstreamProductNoCategory
 	}
 
 	// 分页拉取上游所有商品，筛选属于目标分类的
@@ -150,18 +217,21 @@ func (s *Service) BatchImportByCategory(
 	categoryID := localCategoryID
 	categoryName := ""
 
-	if autoCreateCategory && categoryID == 0 {
-		// 拉取上游分类列表用于自动创建
+	// 分类树只拉这一次：自动创建要用它，配了分类加价的连接算价也要用它。
+	// 之前只在自动创建分支里拉，其他情况每个商品各自拉一遍，200 个商品就是 200 次请求。
+	needCatMap := (autoCreateCategory && categoryID == 0) || usesCategoryMarkup(conn)
+	var catMap map[uint]upstream.UpstreamCategory
+	if needCatMap {
 		catCtx, catCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer catCancel()
-		catResult, catErr := adapter.ListCategories(catCtx)
+		fetched, catErr := s.fetchUpstreamCategoryMap(catCtx, adapter)
 		if catErr != nil {
 			return nil, fmt.Errorf("fetch upstream categories: %w", catErr)
 		}
-		catMap := make(map[uint]upstream.UpstreamCategory)
-		for _, c := range catResult.Categories {
-			catMap[c.ID] = c
-		}
+		catMap = fetched
+	}
+
+	if autoCreateCategory && categoryID == 0 {
 		cat, createErr := s.findOrCreateCategoryFromUpstream(upstreamCategoryID, catMap)
 		if createErr != nil {
 			return nil, fmt.Errorf("auto create category: %w", createErr)
@@ -174,29 +244,34 @@ func (s *Service) BatchImportByCategory(
 		}
 	}
 
-	// 逐个导入
+	// 逐个导入。这里的商品来自上面的一次全量扫描，已经带齐 SKU/内容/图片，
+	// 直接复用，避免每个商品再发一次 GetProduct 触发上游限流。
 	result := &BatchImportByCategoryResult{
 		Total:        len(targetProducts),
 		CategoryID:   categoryID,
 		CategoryName: categoryName,
 	}
-	for _, p := range targetProducts {
-		_, importErr := s.ImportUpstreamProduct(connectionID, p.ID, categoryID, "")
-		if importErr != nil {
-			if errors.Is(importErr, mappingcontract.ErrMappingAlreadyExists) {
-				result.SuccessCount++ // 已映射的算成功
-				continue
-			}
-			result.Errors = append(result.Errors, struct {
-				UpstreamProductID uint   `json:"upstream_product_id"`
-				Error             string `json:"error"`
-			}{
-				UpstreamProductID: p.ID,
-				Error:             importErr.Error(),
-			})
-		} else {
-			result.SuccessCount++
+	for i := range targetProducts {
+		p := &targetProducts[i]
+		importErr := s.ensureNoMapping(connectionID, p.ID)
+		if importErr == nil {
+			_, importErr = s.importUpstreamProductData(connectionID, conn, adapter, p, categoryID, "", autoCreateCategory, catMap)
 		}
+		if importErr == nil {
+			result.SuccessCount++
+			continue
+		}
+		if errors.Is(importErr, mappingcontract.ErrMappingAlreadyExists) {
+			result.SuccessCount++ // 已映射的算成功
+			continue
+		}
+		result.Errors = append(result.Errors, struct {
+			UpstreamProductID uint   `json:"upstream_product_id"`
+			Error             string `json:"error"`
+		}{
+			UpstreamProductID: p.ID,
+			Error:             importErr.Error(),
+		})
 	}
 
 	return result, nil

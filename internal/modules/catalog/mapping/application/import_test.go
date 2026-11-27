@@ -2,10 +2,11 @@ package application
 
 import (
 	"context"
+	"github.com/dujiao-next/internal/constants"
 	"testing"
 
-	"github.com/dujiao-next/internal/constants"
-
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
+	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 
 	"github.com/dujiao-next/internal/shared/money"
@@ -17,7 +18,7 @@ import (
 func TestConvertUpstreamWholesalePricesRemapsUpstreamSKUScope(t *testing.T) {
 	tiers := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
 		{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(80))},
-	}, decimal.NewFromInt(1), decimal.Zero, decimal.Zero, decimal.NewFromInt(15), "", "none", buildUpstreamWholesaleSKUIndex(
+	}, decimal.NewFromInt(1), decimal.Zero, decimal.Zero, "percent", "none", buildUpstreamWholesaleSKUIndex(
 		[]productdomain.ProductSKU{{ID: 11, SKUCode: "SKU-A"}},
 		[]upstream.UpstreamSKU{{ID: 201, SKUCode: "SKU-A"}},
 		nil,
@@ -34,19 +35,21 @@ func TestConvertUpstreamWholesalePricesRemapsUpstreamSKUScope(t *testing.T) {
 func TestConvertUpstreamWholesalePricesDropsUnmappedUpstreamSKUID(t *testing.T) {
 	tiers := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
 		{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(80))},
-	}, decimal.NewFromInt(1), decimal.Zero, decimal.Zero, decimal.NewFromInt(15), "", "none")
+	}, decimal.NewFromInt(1), decimal.Zero, decimal.Zero, "percent", "none")
 
 	if len(tiers) != 0 {
 		t.Fatalf("expected unmapped upstream sku_id tier to be dropped, got %+v", tiers)
 	}
 }
 
-// pagedProductsAdapter 只实现 ListProducts：前 total 条商品按页返回，ignorePage 模拟上游忽略 page 参数。
+// pagedProductsAdapter 只实现 ListProducts：前 total 条商品按页返回，ignorePage 模拟上游忽略 page 参数，
+// clampPageSize 模拟旧上游把 page_size 压到自己的上限（并在响应里回声）。
 type pagedProductsAdapter struct {
 	upstream.Adapter
-	total      int
-	ignorePage bool
-	calls      int
+	total         int
+	ignorePage    bool
+	clampPageSize int
+	calls         int
 }
 
 func (a *pagedProductsAdapter) ListProducts(_ context.Context, opts upstream.ListProductsOpts) (*upstream.ProductListResult, error) {
@@ -55,18 +58,35 @@ func (a *pagedProductsAdapter) ListProducts(_ context.Context, opts upstream.Lis
 	if a.ignorePage {
 		page = 1
 	}
+	pageSize := opts.PageSize
+	if a.clampPageSize > 0 && pageSize > a.clampPageSize {
+		pageSize = a.clampPageSize
+	}
 	var items []upstream.UpstreamProduct
-	for id := (page-1)*opts.PageSize + 1; id <= a.total && len(items) < opts.PageSize; id++ {
+	for id := (page-1)*pageSize + 1; id <= a.total && len(items) < pageSize; id++ {
 		items = append(items, upstream.UpstreamProduct{ID: uint(id), CategoryID: uint(id % 3)})
 	}
 	if a.ignorePage {
-		return &upstream.ProductListResult{Total: 1 << 30, Items: items}, nil
+		return &upstream.ProductListResult{Total: 1 << 30, Items: items, Page: page, PageSize: pageSize}, nil
 	}
-	return &upstream.ProductListResult{Total: a.total, Items: items}, nil
+	return &upstream.ProductListResult{Total: a.total, Items: items, Page: page, PageSize: pageSize}, nil
 }
 
 func TestListAllUpstreamProductsWalksEveryPage(t *testing.T) {
 	adapter := &pagedProductsAdapter{total: 120}
+	products, err := listAllUpstreamProducts(context.Background(), adapter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(products) != 120 || adapter.calls != 1 {
+		t.Fatalf("expected 120 products in 1 call, got %d in %d", len(products), adapter.calls)
+	}
+}
+
+// 旧上游会把 page_size 压到 50：不能把"返回条数 < 请求条数"当成最后一页，
+// 否则商品多的站点只能拉到第一页。
+func TestListAllUpstreamProductsHonorsClampedPageSize(t *testing.T) {
+	adapter := &pagedProductsAdapter{total: 120, clampPageSize: 50}
 	products, err := listAllUpstreamProducts(context.Background(), adapter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -76,13 +96,87 @@ func TestListAllUpstreamProductsWalksEveryPage(t *testing.T) {
 	}
 }
 
+// endlessProductsAdapter 每页都返回全新的商品，total 永远追不上，用于验证翻页上限兜底。
+type endlessProductsAdapter struct {
+	upstream.Adapter
+	calls int
+}
+
+func (a *endlessProductsAdapter) ListProducts(_ context.Context, opts upstream.ListProductsOpts) (*upstream.ProductListResult, error) {
+	a.calls++
+	size := opts.PageSize
+	if size <= 0 {
+		size = 50
+	}
+	items := make([]upstream.UpstreamProduct, 0, size)
+	for i := 0; i < size; i++ {
+		items = append(items, upstream.UpstreamProduct{ID: uint((a.calls-1)*size + i + 1)})
+	}
+	return &upstream.ProductListResult{Total: 1 << 30, Items: items, Page: opts.Page, PageSize: size}, nil
+}
+
 func TestListAllUpstreamProductsStopsAtPageLimit(t *testing.T) {
-	adapter := &pagedProductsAdapter{total: 50, ignorePage: true}
+	adapter := &endlessProductsAdapter{}
 	if _, err := listAllUpstreamProducts(context.Background(), adapter); err == nil {
-		t.Fatal("expected error when upstream pagination never terminates")
+		t.Fatal("expected error when upstream pagination never reaches total")
 	}
 	if adapter.calls != maxUpstreamProductPages {
 		t.Fatalf("expected %d calls, got %d", maxUpstreamProductPages, adapter.calls)
+	}
+}
+
+// 某一页没有带来任何新商品（上游或其缓存重复返回同一批数据）时应立即结束，
+// 不必跑满页数上限。
+func TestListAllUpstreamProductsStopsWhenPageAddsNothing(t *testing.T) {
+	adapter := &pagedProductsAdapter{total: 1 << 30, ignorePage: true}
+	products, err := listAllUpstreamProducts(context.Background(), adapter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(products) != upstreamProductPageSize || adapter.calls != 2 {
+		t.Fatalf("expected %d products in 2 calls, got %d in %d", upstreamProductPageSize, len(products), adapter.calls)
+	}
+}
+
+// updateRecordingMappings 只实现回填用到的写入方法，用于验证写入了哪些映射。
+// 回填走的是单列更新（UpdateUpstreamCategoryID），不是整行 Update。
+type updateRecordingMappings struct {
+	mappingcontract.MappingRepository
+	updated map[uint]uint
+}
+
+func (r *updateRecordingMappings) UpdateUpstreamCategoryID(id uint, upstreamCategoryID uint) error {
+	r.updated[id] = upstreamCategoryID
+	return nil
+}
+
+func TestBackfillUpstreamCategoryIDsFillsOnlyMissing(t *testing.T) {
+	repo := &updateRecordingMappings{updated: map[uint]uint{}}
+	svc := &Service{mappings: repo}
+	adapter := &pagedProductsAdapter{total: 5}
+	// 商品 ID → 分类 ID = id%3：1→1, 2→2, 3→0, 4→1
+	mappings := []mappingdomain.Mapping{
+		{ID: 1, UpstreamProductID: 1},
+		{ID: 2, UpstreamProductID: 2, UpstreamCategoryID: 99}, // 已有分类，不能被覆盖
+		{ID: 3, UpstreamProductID: 3},                         // 上游未分类，保持 0
+		{ID: 4, UpstreamProductID: 4},
+	}
+
+	svc.backfillUpstreamCategoryIDs(context.Background(), adapter, 1, mappings)
+
+	if mappings[0].UpstreamCategoryID != 1 || mappings[1].UpstreamCategoryID != 99 ||
+		mappings[2].UpstreamCategoryID != 0 || mappings[3].UpstreamCategoryID != 1 {
+		t.Fatalf("unexpected backfill result: %+v", mappings)
+	}
+	if len(repo.updated) != 2 || repo.updated[1] != 1 || repo.updated[4] != 1 {
+		t.Fatalf("expected only mappings 1 and 4 persisted, got %v", repo.updated)
+	}
+
+	// 全部都有分类时不应再请求上游
+	adapter.calls = 0
+	svc.backfillUpstreamCategoryIDs(context.Background(), adapter, 1, []mappingdomain.Mapping{{ID: 9, UpstreamCategoryID: 5}})
+	if adapter.calls != 0 {
+		t.Fatalf("expected no upstream request when nothing to backfill, got %d", adapter.calls)
 	}
 }
 
@@ -92,7 +186,7 @@ func TestConvertWholesaleFixedAmountPrices(t *testing.T) {
 		{MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.NewFromInt(3))},
 		{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(2))},
 	}
-	got := convertUpstreamWholesalePrices(tiers, decimal.NewFromInt(2), decimal.NewFromInt(40), decimal.NewFromInt(3), decimal.NewFromInt(15), "fixed_amount", "none", buildUpstreamWholesaleSKUIndex(
+	got := convertUpstreamWholesalePrices(tiers, decimal.NewFromInt(2), decimal.NewFromInt(40), decimal.NewFromInt(3), "fixed_amount", "none", buildUpstreamWholesaleSKUIndex(
 		[]productdomain.ProductSKU{{ID: 11, SKUCode: "SKU-A"}}, []upstream.UpstreamSKU{{ID: 201, SKUCode: "SKU-A"}}, nil,
 	))
 	if len(got) != 3 {
@@ -111,179 +205,9 @@ func TestConvertWholesaleRetainsExistingValidationAfterFixedRounding(t *testing.
 	got := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
 		{MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.RequireFromString("4.02"))},
 		{MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.RequireFromString("4.01"))},
-	}, decimal.NewFromInt(1), decimal.Zero, decimal.NewFromInt(3), decimal.NewFromInt(15), "fixed_amount", "ceil_int")
+	}, decimal.NewFromInt(1), decimal.Zero, decimal.NewFromInt(3), "fixed_amount", "ceil_int")
 	if len(got) != 0 {
 		t.Fatalf("expected invalid rounded tiers to be rejected, got %+v", got)
-	}
-}
-
-func TestConvertSegmentedWholesalePrices(t *testing.T) {
-	tier := func(quantity int, cost string) productdomain.WholesalePriceTier {
-		return productdomain.WholesalePriceTier{MinQuantity: quantity, UnitPrice: money.FromDecimal(decimal.RequireFromString(cost))}
-	}
-	for _, tt := range []struct {
-		name     string
-		tiers    productdomain.WholesalePriceTiers
-		rate     string
-		rounding string
-		want     productdomain.WholesalePriceTiers
-	}{
-		{
-			name:  "cross threshold omits more expensive tier",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(10, "15"), tier(20, "14")},
-			rate:  "1", rounding: "none",
-			want: productdomain.WholesalePriceTiers{tier(5, "19.63"), tier(20, "19")},
-		},
-		{
-			name:  "equal prices across threshold are redundant",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(10, "14.63"), tier(20, "14.62")},
-			rate:  "1", rounding: "none",
-			want: productdomain.WholesalePriceTiers{tier(5, "19.63"), tier(20, "19.62")},
-		},
-		{
-			name:  "consecutive omissions compare against last retained tier",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(10, "15"), tier(15, "14.90"), tier(20, "14.80"), tier(25, "14.60")},
-			rate:  "1", rounding: "none",
-			want: productdomain.WholesalePriceTiers{tier(5, "19.63"), tier(25, "19.60")},
-		},
-		{
-			name:  "sort source quantities before comparing",
-			tiers: productdomain.WholesalePriceTiers{tier(20, "14"), tier(10, "15"), tier(5, "15.10")},
-			rate:  "1", rounding: "none",
-			want: productdomain.WholesalePriceTiers{tier(5, "19.63"), tier(20, "19")},
-		},
-		{
-			name:  "compare after integer ceiling",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(10, "15"), tier(20, "14")},
-			rate:  "1", rounding: "ceil_int",
-			want: productdomain.WholesalePriceTiers{tier(5, "20"), tier(20, "19")},
-		},
-		{
-			name:  "compare after tenth ceiling",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(10, "14.70"), tier(20, "14.60")},
-			rate:  "1", rounding: "ceil_tenth",
-			want: productdomain.WholesalePriceTiers{tier(5, "19.70"), tier(20, "19.60")},
-		},
-		{
-			name:  "compare after two decimal rounding",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "4.02"), tier(10, "4.01"), tier(20, "3.91")},
-			rate:  "0.1", rounding: "none",
-			want: productdomain.WholesalePriceTiers{tier(5, "5.40"), tier(20, "5.39")},
-		},
-		{
-			name:  "convert cost before selecting branch",
-			tiers: productdomain.WholesalePriceTiers{tier(5, "7.55"), tier(10, "7.50"), tier(20, "7")},
-			rate:  "2", rounding: "none",
-			want: productdomain.WholesalePriceTiers{tier(5, "19.63"), tier(20, "19")},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got := convertUpstreamWholesalePrices(tt.tiers, decimal.RequireFromString(tt.rate), decimal.NewFromInt(30), decimal.NewFromInt(5), decimal.NewFromInt(15), constants.ConnectionPriceMarkupSegmented, tt.rounding)
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %+v, want %+v", got, tt.want)
-			}
-			for i, want := range tt.want {
-				if got[i].MinQuantity != want.MinQuantity || !got[i].UnitPrice.Equal(want.UnitPrice.Decimal) {
-					t.Errorf("tier %d: got %+v, want %+v", i, got[i], want)
-				}
-			}
-		})
-	}
-}
-
-func TestConvertSegmentedWholesalePricesRejectsInvalidSourceBeforePruning(t *testing.T) {
-	tier := func(quantity int, cost string) productdomain.WholesalePriceTier {
-		return productdomain.WholesalePriceTier{MinQuantity: quantity, UnitPrice: money.FromDecimal(decimal.RequireFromString(cost))}
-	}
-	for _, tt := range []struct {
-		name  string
-		tiers productdomain.WholesalePriceTiers
-	}{
-		{"duplicate quantities", productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(5, "15")}},
-		{"increasing source costs despite decreasing sale prices", productdomain.WholesalePriceTiers{tier(5, "15"), tier(10, "15.10")}},
-		{"equal source costs", productdomain.WholesalePriceTiers{tier(5, "15.10"), tier(10, "15.10")}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got := convertUpstreamWholesalePrices(tt.tiers, decimal.NewFromInt(1), decimal.NewFromInt(30), decimal.NewFromInt(5), decimal.NewFromInt(15), constants.ConnectionPriceMarkupSegmented, "none")
-			if len(got) != 0 {
-				t.Fatalf("expected malformed source tiers to be rejected before pruning, got %+v", got)
-			}
-		})
-	}
-}
-
-func TestConvertSegmentedWholesalePricesKeepsScopesIndependent(t *testing.T) {
-	amount := func(cost string) money.Amount { return money.FromDecimal(decimal.RequireFromString(cost)) }
-	for _, tc := range []struct {
-		name  string
-		codeA string
-		codeB string
-	}{
-		{"SKU codes", "SKU-A", "SKU-B"},
-		{"SKU IDs without codes", "", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			index := upstreamWholesaleSKUIndex{byUpstreamID: map[uint]upstreamWholesaleSKURef{
-				201: {ID: 11, SKUCode: tc.codeA},
-				202: {ID: 12, SKUCode: tc.codeB},
-			}}
-			got := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
-				{MinQuantity: 5, UnitPrice: amount("10")},
-				{SKUID: 201, MinQuantity: 5, UnitPrice: amount("16")},
-				{SKUID: 201, MinQuantity: 10, UnitPrice: amount("15")},
-				{SKUID: 201, MinQuantity: 20, UnitPrice: amount("14")},
-				{SKUID: 202, MinQuantity: 5, UnitPrice: amount("15.10")},
-				{SKUID: 202, MinQuantity: 10, UnitPrice: amount("15")},
-				{SKUID: 202, MinQuantity: 20, UnitPrice: amount("14")},
-			}, decimal.NewFromInt(1), decimal.NewFromInt(30), decimal.NewFromInt(5), decimal.NewFromInt(15), constants.ConnectionPriceMarkupSegmented, "none", index)
-			want := map[uint]map[int]string{
-				0:  {5: "15.00"},
-				11: {5: "20.80", 10: "20.00", 20: "19.00"},
-				12: {5: "19.63", 20: "19.00"},
-			}
-			if len(got) != 6 {
-				t.Fatalf("got %+v, want all 6 retained tiers", got)
-			}
-			for _, tier := range got {
-				if tier.UnitPrice.String() != want[tier.SKUID][tier.MinQuantity] {
-					t.Errorf("unexpected tier: %+v", tier)
-				}
-			}
-			product := &productdomain.Product{WholesalePrices: got}
-			price, _, matched := productdomain.ResolveWholesaleUnitPriceForSKU(product, decimal.NewFromInt(20), 11, tc.codeA, 5, 5)
-			if matched || !price.Equal(decimal.NewFromInt(20)) {
-				t.Fatalf("first SKU tier must keep precedence over universal tiers even above base price; got %s, matched=%v", price, matched)
-			}
-		})
-	}
-}
-
-func TestConvertSegmentedWholesalePricesUsesCanonicalMappedScope(t *testing.T) {
-	amount := func(cost string) money.Amount { return money.FromDecimal(decimal.RequireFromString(cost)) }
-	index := buildUpstreamWholesaleSKUIndex(
-		[]productdomain.ProductSKU{{ID: 11, SKUCode: "SKU-A"}},
-		[]upstream.UpstreamSKU{{ID: 201, SKUCode: "SKU-A"}}, nil,
-	)
-	for _, tt := range []struct {
-		name     string
-		quantity int
-		wantLen  int
-	}{
-		{"mixed ID and code scope compare together", 10, 1},
-		{"duplicate quantities after SKU remapping rejected", 5, 0},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
-				{SKUID: 201, MinQuantity: 5, UnitPrice: amount("15.10")},
-				{SKUCode: " sku-a ", MinQuantity: tt.quantity, UnitPrice: amount("15")},
-			}, decimal.NewFromInt(1), decimal.NewFromInt(30), decimal.NewFromInt(5), decimal.NewFromInt(15), constants.ConnectionPriceMarkupSegmented, "none", index)
-			if len(got) != tt.wantLen {
-				t.Fatalf("got %+v, want %d tiers", got, tt.wantLen)
-			}
-			if len(got) > 0 && (got[0].SKUID != 11 || got[0].SKUCode != "SKU-A" || got[0].UnitPrice.String() != "19.63") {
-				t.Fatalf("expected canonical local SKU scope, got %+v", got)
-			}
-		})
 	}
 }
 
@@ -292,7 +216,7 @@ func TestConvertWholesaleRetainsExistingValidationAfterPercentRounding(t *testin
 		got := convertUpstreamWholesalePrices(productdomain.WholesalePriceTiers{
 			{MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.RequireFromString("4.02"))},
 			{MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.RequireFromString("4.01"))},
-		}, decimal.NewFromInt(1), decimal.NewFromInt(30), decimal.NewFromInt(5), decimal.NewFromInt(15), mode, "ceil_int")
+		}, decimal.NewFromInt(1), decimal.NewFromInt(30), decimal.NewFromInt(5), mode, "ceil_int")
 		if len(got) != 0 {
 			t.Fatalf("mode %q: expected rounded equal tiers to remain invalid, got %+v", mode, got)
 		}

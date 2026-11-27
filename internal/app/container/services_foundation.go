@@ -125,7 +125,7 @@ func (c *Container) initIdentityAndCatalogServices() {
 		MaxWidth:          c.Config.Upload.MaxWidth,
 		MaxHeight:         c.Config.Upload.MaxHeight,
 	}, uploadlocal.New("uploads"))
-	c.AffiliateService = affiliateapp.NewService(c.AffiliateRepo, c.UserStore, c.OrderStore, c.ProductRepo, c.SettingService)
+	c.AffiliateService = affiliateapp.NewService(c.AffiliateRepo, c.UserStore, c.OrderStore, c.ProductRepo, c.ProductSKURepo, c.SettingService)
 	productServices := catalogproductbootstrap.New(catalogproductbootstrap.Dependencies{
 		Products:          c.ProductRepo,
 		SKUs:              c.ProductSKURepo,
@@ -133,6 +133,7 @@ func (c *Container) initIdentityAndCatalogServices() {
 		CardSecretBatches: c.CardSecretBatchRepo,
 		Categories:        c.CategoryRepo,
 		MemberLevelPrices: c.MemberLevelPriceRepo,
+		UserPrices:        c.UserProductPriceRepo,
 		Carts:             c.CartRepo,
 		ProductMappings:   c.ProductMappingRepo,
 		Orders:            c.OrderStore,

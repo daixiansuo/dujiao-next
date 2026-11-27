@@ -14,6 +14,7 @@ import { buildSkuDisplayText, normalizeSkuId } from '../utils/sku'
 import { resolveSkuAvailableStock, resolveSkuStockDisplay, type PublicStockDisplay } from '../utils/publicStock'
 import { useLocalized, useProductLabels } from './useProduct'
 import { toast } from './useToast'
+import { useAffiliateProductLink } from './useAffiliateProductLink'
 
 /**
  * 商品详情页的全部业务逻辑（数据加载、SKU/数量、促销/会员/批发定价、库存约束、
@@ -60,6 +61,10 @@ export function useProductDetail(options: { onLoaded?: () => void } = {}) {
 
   const loading = ref(true)
   const product = ref<any>(null)
+  const { canShareAffiliateLink, copyAffiliateLink, affiliateRateHint } = useAffiliateProductLink(
+    computed(() => String(product.value?.slug || '')),
+    { productId: () => Number(product.value?.id || 0), skuId: () => selectedSkuId.value },
+  )
   const relatedPosts = computed<any[]>(() => product.value?.related_posts || [])
   const formatRelatedPostDate = (dateString: string) => {
     if (!dateString) return ''
@@ -91,13 +96,17 @@ export function useProductDetail(options: { onLoaded?: () => void } = {}) {
   })
 
   const ensureMemberLevels = () => {
+    void userProfileStore.loadMyProductPrices()
     if (userMemberLevelId.value > 0 && userProfileStore.memberLevels.length === 0) {
       void userProfileStore.loadMemberLevels()
     }
   }
 
   const getMemberPriceForSku = (skuId: number, basePrice: any): number | null => {
-    const price = resolveMemberPriceAmount(product.value, skuId, basePrice, userMemberLevelId.value, currentMemberDiscountRate.value)
+    const price = resolveMemberPriceAmount(
+      product.value, skuId, basePrice, userMemberLevelId.value, currentMemberDiscountRate.value,
+      userAuthStore.isAuthenticated ? userProfileStore.myProductPrices : [],
+    )
     return price === null ? null : Number(price)
   }
 
@@ -561,6 +570,7 @@ export function useProductDetail(options: { onLoaded?: () => void } = {}) {
         currentImage.value = images.value[0] || ''
       }
       syncSelectedSku()
+      loading.value = false
       await nextTick()
       options.onLoaded?.()
     } catch (error) {
@@ -668,6 +678,10 @@ export function useProductDetail(options: { onLoaded?: () => void } = {}) {
     ensureMemberLevels()
   })
 
+  watch(() => userAuthStore.user?.id, () => {
+    ensureMemberLevels()
+  })
+
   watch(
     () => selectedSkuId.value,
     () => {
@@ -719,6 +733,8 @@ export function useProductDetail(options: { onLoaded?: () => void } = {}) {
     backToListTo,
     // 动作
     addToCart, buyNow, goLogin, loadProduct,
+    // 推广返利：复制带推广码的单品链接
+    canShareAffiliateLink, copyAffiliateLink, affiliateRateHint,
     // 移动端购买条
     mobileBarShowMemberPrice, mobileBarMemberPriceDisplay,
     mobileBarShowSkuPromotionPrice, mobileBarSkuPromotionPriceDisplay,

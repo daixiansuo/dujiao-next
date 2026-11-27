@@ -38,6 +38,8 @@ export interface AdminProductSKU {
   manual_stock_sold: number
   auto_stock_available: number
   auto_stock_total: number
+  // 返利比例（%）：缺省/null 继承商品与全站比例，0 表示该规格不参与返利
+  affiliate_rate_percent?: string | number | null
   is_active: boolean
   sort_order: number
   created_at: string
@@ -74,7 +76,8 @@ export interface AdminProduct {
   manual_stock_locked: number
   manual_stock_sold: number
   payment_channel_ids: string
-  is_affiliate_enabled: boolean
+  // 返利比例（%）：缺省/null 继承全站比例，0 表示该商品不参与返利
+  affiliate_rate_percent?: string | number | null
   auto_stock_available: number
   auto_stock_total: number
   auto_stock_locked: number
@@ -186,6 +189,8 @@ export interface AdminOrder {
   payments?: AdminPayment[]
   user_display_name?: string
   user_email?: string
+  // 订单详情接口返回：退款时是否按比例冲回成本（仪表盘统计口径）
+  refund_reverses_cost?: boolean
 }
 
 export interface AdminUserOAuthIdentity {
@@ -310,6 +315,24 @@ export interface AdminMemberLevel {
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+export interface AdminUserProductPrice {
+  id: number
+  user_id: number
+  product_id: number
+  sku_id: number
+  price_amount: number | string
+  created_at: string
+  updated_at: string
+  // 列表接口随行返回的商品/SKU 摘要，避免后台每行再单独请求商品详情
+  product_title?: Record<string, string>
+  product_slug?: string
+  product_active?: boolean
+  product_price_amount?: number | string
+  sku_code?: string
+  sku_spec_values?: Record<string, string>
+  sku_price_amount?: number | string
 }
 
 export interface AdminMemberLevelPrice {
@@ -573,11 +596,11 @@ export interface AdminSiteConnection {
   last_ping_at?: string
   last_ping_status?: string
   exchange_rate?: number
-  price_markup_mode?: 'percent' | 'fixed_amount' | 'segmented'
-  price_markup_threshold?: string
+  price_markup_mode?: string // 保留未知旧值用于显式转换提示
   price_markup_amount?: string
   price_markup_percent?: number
   price_rounding_mode?: string
+  category_markups?: Record<string, number> | null
   auto_sync_price?: boolean
   created_at: string
   updated_at: string

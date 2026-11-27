@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import CategorySidebar from '../../../components/CategorySidebar.vue'
+import { useMediaQuery } from '@vueuse/core'
+import { DialogClose, DialogContent, DialogOverlay, DialogPortal, DialogRoot, DialogTitle, DialogTrigger } from 'reka-ui'
+import { Filter, X } from 'lucide-vue-next'
+import { Button } from '../../../components/ui/button'
 import CategoryTree from '../../../components/CategoryTree.vue'
 import { getImageUrl } from '../../../utils/image'
 import { useLocalized } from '../../../composables/useProduct'
-import { buildCategoryPath, createCategoryMap, flattenCategoryGroups, type CategoryGroup, type PublicCategory } from '../../../utils/category'
+import { buildCategoryPath, createCategoryMap, flattenCategoryGroups, getCategoryAncestors, type CategoryGroup, type PublicCategory } from '../../../utils/category'
 
 const props = defineProps<{
   categoryGroups: CategoryGroup[]
@@ -19,6 +22,19 @@ const { getLocalizedText } = useLocalized()
 const catName = (category: PublicCategory) => getLocalizedText(category.name) || category.slug || ''
 const categoryMap = computed(() => createCategoryMap(flattenCategoryGroups(props.categoryGroups)))
 const selectedPath = computed(() => buildCategoryPath(categoryMap.value.get(props.selectedCategory || 0), categoryMap.value, getLocalizedText))
+// 抽屉复用递归分类树，恢复深层链接的祖先路径，并在进入桌面布局时释放模态焦点。
+const isDesktop = useMediaQuery('(min-width: 1024px)')
+watch(isDesktop, (desktop) => { if (desktop) drawerOpen.value = false })
+watch(drawerOpen, (open) => {
+  if (!open) return
+  for (const ancestor of getCategoryAncestors(categoryMap.value.get(props.selectedCategory || 0), categoryMap.value)) {
+    if (!props.expandedParentIds.includes(ancestor.id)) emit('toggle', ancestor.id)
+  }
+})
+const selectMobileCategory = (id: number | null) => {
+  emit('select', id)
+  drawerOpen.value = false
+}
 </script>
 
 <template>
@@ -30,16 +46,27 @@ const selectedPath = computed(() => buildCategoryPath(categoryMap.value.get(prop
       </div>
 
       <div class="space-y-2 lg:hidden">
-        <CategorySidebar
-          :categories="categoryGroups"
-          :selected-category="selectedCategory"
-          :expanded-parent-ids="expandedParentIds"
-          :show-drawer="drawerOpen"
-          mobile-only
-          @update:show-drawer="drawerOpen = $event"
-          @select-category="emit('select', $event)"
-          @toggle-parent="emit('toggle', $event)"
-        />
+        <DialogRoot v-model:open="drawerOpen">
+          <DialogTrigger as-child>
+            <Button variant="secondary" class="min-h-11 gap-2 rounded-xl text-sm font-medium">
+              <Filter class="h-4 w-4" />{{ t('products.browseCategories') }}
+            </Button>
+          </DialogTrigger>
+          <DialogPortal>
+            <DialogOverlay class="fixed inset-0 z-[80] bg-black/50" />
+            <DialogContent :aria-describedby="undefined" class="fixed bottom-0 left-0 top-0 z-[90] w-80 max-w-[88vw] overflow-y-auto overscroll-contain border-r bg-card p-4 text-foreground shadow-xl outline-none pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <div class="mb-4 flex items-center justify-between gap-2">
+                <DialogTitle class="text-base font-bold">{{ t('products.categories') }}</DialogTitle>
+                <DialogClose as-child>
+                  <Button variant="ghost" size="icon" class="min-h-11 min-w-11" :aria-label="t('common.close')"><X class="h-5 w-5" /></Button>
+                </DialogClose>
+              </div>
+              <p v-if="selectedPath" class="mb-4 break-words text-sm text-muted-foreground">{{ selectedPath }}</p>
+              <button type="button" class="mb-1 min-h-11 w-full rounded-xl px-3 py-2 text-left" :class="selectedCategory === null ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'" @click="selectMobileCategory(null)">{{ t('products.allCategories') }}</button>
+              <CategoryTree :categories="categoryGroups" :selected-category="selectedCategory" :expanded-parent-ids="expandedParentIds" variant="vault" @select="selectMobileCategory" @toggle="emit('toggle', $event)" />
+            </DialogContent>
+          </DialogPortal>
+        </DialogRoot>
         <div class="flex gap-1.5 overflow-x-auto pb-1">
           <button type="button" class="min-h-11 flex-none whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition-colors" :class="selectedCategory === null ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'" @click="emit('select', null)">{{ t('products.allCategories') }}</button>
           <button v-for="category in categoryGroups" :key="category.id" type="button" class="flex min-h-11 max-w-[65vw] flex-none items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition-colors" :class="selectedCategory === category.id ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'" @click="emit('select', category.id)">

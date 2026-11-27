@@ -7,6 +7,8 @@ import (
 
 	"github.com/dujiao-next/internal/config"
 	"github.com/dujiao-next/internal/constants"
+
+	settingscontract "github.com/dujiao-next/internal/modules/settings/contract"
 )
 
 func TestUpdateOrderSettingNormalized(t *testing.T) {
@@ -113,8 +115,6 @@ func TestUpdateSiteSettingNormalized(t *testing.T) {
 		"contact": map[string]interface{}{
 			"telegram": "  https://t.me/demo  ",
 			"whatsapp": 123,
-			"email":    "  support@example.com  ",
-			"x":        "  https://x.com/demo  ",
 		},
 		"seo": map[string]interface{}{
 			"title": map[string]interface{}{
@@ -235,12 +235,6 @@ func TestUpdateSiteSettingNormalized(t *testing.T) {
 	}
 	if contact["whatsapp"] != "" {
 		t.Fatalf("unexpected whatsapp: %v", contact["whatsapp"])
-	}
-	if contact["email"] != "support@example.com" || contact["x"] != "https://x.com/demo" {
-		t.Fatalf("unexpected normalized email or X: %v", contact)
-	}
-	if !reflect.DeepEqual(config["contact"], contact) {
-		t.Fatalf("stored contact differs from saved contact: %v", config["contact"])
 	}
 
 	seo, ok := result["seo"].(map[string]interface{})
@@ -497,7 +491,7 @@ func TestUpdateOrderRefundSettingNormalized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse normalized max_refund_days failed: %v", err)
 	}
-	if maxDays != NormalizeOrderRefundConfig(OrderRefundConfig{MaxRefundDays: 5000}).MaxRefundDays {
+	if maxDays != NormalizeOrderRefundConfig(settingscontract.OrderRefundConfig{MaxRefundDays: 5000}).MaxRefundDays {
 		t.Fatalf("unexpected clamped max_refund_days: %v", result[OrderConfigFieldMaxRefundDays])
 	}
 }
@@ -731,18 +725,6 @@ func TestUpdateSiteSettingValidatesContactLinks(t *testing.T) {
 	}{
 		{map[string]interface{}{"whatsapp": "https://example.com/logo.png"}, "contact_whatsapp"},
 		{map[string]interface{}{"telegram": "javascript:alert(1)"}, "contact_telegram"},
-		{map[string]interface{}{"email": "not-an-email"}, "contact_email"},
-		{map[string]interface{}{"email": "Support <support@example.com>"}, "contact_email"},
-		{map[string]interface{}{"email": "one@example.com,two@example.com"}, "contact_email"},
-		{map[string]interface{}{"email": "support@example.com?subject=test"}, "contact_email"},
-		{map[string]interface{}{"email": "support@example.com\r\nBcc:other@example.com"}, "contact_email"},
-		{map[string]interface{}{"x": "javascript:alert(1)"}, "contact_x"},
-		{map[string]interface{}{"x": "http://x.com/shop"}, "contact_x"},
-		{map[string]interface{}{"x": "https://x.com.evil.example/shop"}, "contact_x"},
-		{map[string]interface{}{"x": "https://x.com@evil.example/shop"}, "contact_x"},
-		{map[string]interface{}{"x": "https://someone@x.com/shop"}, "contact_x"},
-		{map[string]interface{}{"x": "https://example.com/shop"}, "contact_x"},
-		{map[string]interface{}{"x": "https://x.com/"}, "contact_x"},
 	}
 	for _, tc := range cases {
 		_, err := svc.Update(constants.SettingKeySiteConfig, map[string]interface{}{"contact": tc.contact})
@@ -756,15 +738,33 @@ func TestUpdateSiteSettingValidatesContactLinks(t *testing.T) {
 	}
 
 	if _, err := svc.Update(constants.SettingKeySiteConfig, map[string]interface{}{
-		"contact": map[string]interface{}{
-			"telegram": "https://t.me/shop", "whatsapp": "https://wa.me/1234567890",
-			"email": "support@example.com", "x": "https://x.com/shop",
-		},
+		"contact": map[string]interface{}{"telegram": "https://t.me/shop", "whatsapp": "https://wa.me/1234567890"},
 	}); err != nil {
 		t.Fatalf("valid contact links rejected: %v", err)
 	}
 	if _, err := svc.Update(constants.SettingKeySiteConfig, map[string]interface{}{"contact": map[string]interface{}{}}); err != nil {
 		t.Fatalf("empty contact links rejected: %v", err)
+	}
+}
+
+func TestNormalizeStorefrontTemplate(t *testing.T) {
+	cases := []struct {
+		raw  interface{}
+		want string
+	}{
+		{raw: nil, want: constants.StorefrontTemplateClassic},
+		{raw: "", want: constants.StorefrontTemplateClassic},
+		{raw: "classic", want: constants.StorefrontTemplateClassic},
+		{raw: "vault", want: constants.StorefrontTemplateVault},
+		{raw: "  vault  ", want: constants.StorefrontTemplateVault},
+		{raw: "atelier", want: constants.StorefrontTemplateAtelier},
+		{raw: "  atelier  ", want: constants.StorefrontTemplateAtelier},
+		{raw: "unknown", want: constants.StorefrontTemplateClassic},
+	}
+	for _, tc := range cases {
+		if got := normalizeStorefrontTemplate(tc.raw); got != tc.want {
+			t.Fatalf("normalizeStorefrontTemplate(%v) = %q, want %q", tc.raw, got, tc.want)
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { AdminSiteConnection } from '@/api/types'
@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import TableSkeleton from '@/components/TableSkeleton.vue'
 import ListPagination from '@/components/ListPagination.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { getLocalizedText } from '@/utils/format'
 import { confirmAction } from '@/utils/confirm'
 import { notifyError, notifySuccess } from '@/utils/notify'
 import { useFormValidation, rules } from '@/composables/useFormValidation'
@@ -40,13 +41,77 @@ const form = reactive({
   retry_intervals: '30,60,120',
   exchange_rate: 1,
   price_markup_mode: 'percent' as NonNullable<AdminSiteConnection['price_markup_mode']>,
-  price_markup_threshold: '0.00',
   price_markup_amount: '0.00',
   price_markup_percent: 0,
   price_rounding_mode: 'none',
   auto_sync_price: 'false',
 })
 const reapplyingId = ref<number | null>(null)
+const isSupportedMarkupMode = (mode?: string) => !mode || mode === 'percent' || mode === 'fixed_amount'
+const editingLegacyMode = ref(false)
+
+// 按上游分类加价：键为上游分类 ID，值为输入框内容（空表示沿用默认加价）
+interface UpstreamCategoryItem {
+  id: number
+  parent_id: number
+  name: Record<string, string>
+  sort_order: number
+}
+const categoryMarkupInputs = reactive<Record<string, number | string>>({})
+const upstreamCategories = ref<UpstreamCategoryItem[]>([])
+const loadingUpstreamCategories = ref(false)
+const upstreamCategoriesLoaded = ref(false)
+const upstreamCategoriesSupported = ref(true)
+
+const resetCategoryMarkups = (source?: Record<string, number> | null) => {
+  for (const key of Object.keys(categoryMarkupInputs)) delete categoryMarkupInputs[key]
+  for (const [key, value] of Object.entries(source || {})) categoryMarkupInputs[key] = value
+  upstreamCategories.value = []
+  upstreamCategoriesLoaded.value = false
+  upstreamCategoriesSupported.value = true
+}
+
+// 按父子关系展开成带缩进层级的列表，成环或父分类缺失的分类按顶层处理
+const categoryRows = computed(() => {
+  const items = upstreamCategories.value
+  const ids = new Set(items.map((c) => c.id))
+  const childrenOf = new Map<number, UpstreamCategoryItem[]>()
+  for (const c of items) {
+    const parent = ids.has(c.parent_id) && c.parent_id !== c.id ? c.parent_id : 0
+    const list = childrenOf.get(parent) || []
+    list.push(c)
+    childrenOf.set(parent, list)
+  }
+  const rows: { category: UpstreamCategoryItem; depth: number }[] = []
+  const visited = new Set<number>()
+  const walk = (parent: number, depth: number) => {
+    const list = [...(childrenOf.get(parent) || [])].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+    for (const c of list) {
+      if (visited.has(c.id)) continue
+      visited.add(c.id)
+      rows.push({ category: c, depth })
+      walk(c.id, depth + 1)
+    }
+  }
+  walk(0, 0)
+  return rows
+})
+
+const loadUpstreamCategories = async () => {
+  if (!editingId.value) return
+  loadingUpstreamCategories.value = true
+  try {
+    const res = await adminAPI.getUpstreamCategories({ connection_id: String(editingId.value) })
+    const data = res.data.data as { supported?: boolean; categories?: UpstreamCategoryItem[] } | null
+    upstreamCategoriesSupported.value = data?.supported ?? false
+    upstreamCategories.value = data?.categories || []
+    upstreamCategoriesLoaded.value = true
+  } catch (err: any) {
+    notifyError(err?.response?.data?.message || err?.message)
+  } finally {
+    loadingUpstreamCategories.value = false
+  }
+}
 
 const siteConnectionSchema = {
   name: [rules.required()],
@@ -102,15 +167,16 @@ const resetForm = () => {
     retry_intervals: '30,60,120',
     exchange_rate: 1,
     price_markup_mode: 'percent',
-    price_markup_threshold: '0.00',
     price_markup_amount: '0.00',
     price_markup_percent: 0,
     price_rounding_mode: 'none',
     auto_sync_price: 'false',
   })
+  resetCategoryMarkups()
 }
 
 const openCreateModal = () => {
+  editingLegacyMode.value = false
   isEditing.value = false
   editingId.value = null
   clearErrors()
@@ -119,6 +185,7 @@ const openCreateModal = () => {
 }
 
 const openEditModal = (conn: AdminSiteConnection) => {
+  editingLegacyMode.value = !isSupportedMarkupMode(conn.price_markup_mode)
   isEditing.value = true
   editingId.value = conn.id
   Object.assign(form, {
@@ -143,12 +210,13 @@ const openEditModal = (conn: AdminSiteConnection) => {
     })(),
     exchange_rate: conn.exchange_rate ?? 1,
     price_markup_mode: conn.price_markup_mode || 'percent',
-    price_markup_threshold: String(conn.price_markup_threshold ?? '0.00'),
     price_markup_amount: String(conn.price_markup_amount ?? '0.00'),
     price_markup_percent: conn.price_markup_percent ?? 0,
     price_rounding_mode: conn.price_rounding_mode || 'none',
     auto_sync_price: conn.auto_sync_price ? 'true' : 'false',
   })
+  resetCategoryMarkups(conn.category_markups)
+  pricingSnapshot = pricingKey(buildPayload())
   showModal.value = true
 }
 
@@ -173,9 +241,6 @@ const buildPayload = () => {
     retry_intervals: JSON.stringify(intervals),
     exchange_rate: Number(form.exchange_rate) || 1,
     price_markup_mode: form.price_markup_mode,
-    ...(form.price_markup_mode === 'segmented'
-      ? { price_markup_threshold: String(form.price_markup_threshold) }
-      : {}),
     ...(form.price_markup_mode !== 'percent'
       ? { price_markup_amount: String(form.price_markup_amount) }
       : {}),
@@ -184,21 +249,68 @@ const buildPayload = () => {
       : {}),
     price_rounding_mode: form.price_rounding_mode,
     auto_sync_price: form.auto_sync_price === 'true',
+    category_markups: buildCategoryMarkups(),
   }
 }
 
+// 空输入表示沿用默认加价，不写入；始终提交对象（可为空）以便清空已有配置。
+//
+// 只有「上游支持分类 + 确实拿到了分类列表」时才按已知分类过滤：
+// 上游返回 supported=false 或空列表时，known 集合会是空的，一旦用来过滤就会把
+// 已配置的加价全部丢掉，保存时被后端当成「清空」并触发重算。
+const buildCategoryMarkups = () => {
+  const canFilter = upstreamCategoriesLoaded.value &&
+    upstreamCategoriesSupported.value &&
+    upstreamCategories.value.length > 0
+  const known = canFilter
+    ? new Set(upstreamCategories.value.map((c) => String(c.id)))
+    : null
+  const result: Record<string, number> = {}
+  for (const [key, value] of Object.entries(categoryMarkupInputs)) {
+    if (known && !known.has(key)) continue
+    if (value === '' || value === null || value === undefined) continue
+    const n = Number(value)
+    if (Number.isFinite(n) && n >= 0) result[key] = n
+  }
+  return result
+}
+
+// 定价相关字段的快照：只有它们变了，保存后才补一次完整重算，
+// 否则只改名称/密钥也会把手动调过的售价全部覆盖。
+let pricingSnapshot = ''
+const pricingKey = (p: ReturnType<typeof buildPayload>) =>
+  JSON.stringify([p.exchange_rate, p.price_markup_mode, p.price_markup_mode === 'fixed_amount' ? p.price_markup_amount : [p.price_markup_percent, p.category_markups], p.price_rounding_mode])
+
 const handleSubmit = async () => {
+  if (!isSupportedMarkupMode(form.price_markup_mode)) { notifyError(t('siteConnections.form.legacyMarkupHint')); return }
   if (!validate({ ...form } as Record<string, unknown>)) return
   try {
     const payload = buildPayload()
+    let savedId = editingId.value
     if (isEditing.value && editingId.value) {
       await adminAPI.updateSiteConnection(editingId.value, payload)
     } else {
-      await adminAPI.createSiteConnection(payload)
+      const res = await adminAPI.createSiteConnection(payload)
+      savedId = (res.data?.data as { id?: number } | undefined)?.id ?? null
     }
     closeModal()
     fetchConnections(isEditing.value ? pagination.page : 1)
-    notifySuccess()
+
+    // 保存时后端只按本地已知分类 ID 重算，继承父分类、分类未配置和分类 ID 还是 0 的
+    // 旧映射会被跳过。这里补一次完整重算（会拉分类树），否则页面显示成功但价格没变。
+    const pricingChanged = !isEditing.value || pricingKey(payload) !== pricingSnapshot
+    if (savedId && !editingLegacyMode.value && payload.price_markup_mode === 'percent' && pricingChanged && Object.keys(payload.category_markups ?? {}).length > 0) {
+      try {
+        const res = await adminAPI.reapplyConnectionMarkup(savedId)
+        const count = (res.data?.data as { updated_products?: number } | undefined)?.updated_products ?? 0
+        notifySuccess(t('siteConnections.reapplyMarkup.success', { count }))
+      } catch (err: any) {
+        // 连接本身已保存成功，这里只提示重算失败，避免让人以为保存没生效。
+        notifyError(t('siteConnections.reapplyMarkup.autoFailed') + ': ' + (err?.response?.data?.message || err?.message || ''))
+      }
+    } else {
+      notifySuccess()
+    }
   } catch (err: any) {
     notifyError(err?.response?.data?.message || err?.message)
   }
@@ -329,9 +441,7 @@ onMounted(() => {
             <TableCell class="min-w-[200px] px-6 py-4 text-xs text-muted-foreground font-mono break-all">{{ conn.base_url }}</TableCell>
             <TableCell class="min-w-[80px] px-6 py-4 text-xs text-muted-foreground break-words">{{ conn.protocol }}</TableCell>
             <TableCell class="min-w-[80px] px-6 py-4 text-xs text-muted-foreground">
-              <span v-if="conn.price_markup_mode === 'segmented'" class="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700" :title="t('siteConnections.form.segmentedMarkupHint')">
-                {{ t('siteConnections.segmentedBadge', { threshold: conn.price_markup_threshold ?? '0.00', amount: conn.price_markup_amount ?? '0.00', percent: conn.price_markup_percent ?? 0 }) }}
-              </span>
+              <span v-if="!isSupportedMarkupMode(conn.price_markup_mode)" class="text-xs text-amber-600">{{ t('siteConnections.form.legacyMarkupHint') }}</span>
               <span v-else-if="conn.price_markup_mode === 'fixed_amount'" class="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700" :title="t('siteConnections.form.priceMarkupAmountHint')">
                 {{ t('siteConnections.fixedAmountBadge', { amount: conn.price_markup_amount ?? '0.00' }) }}
               </span>
@@ -443,6 +553,7 @@ onMounted(() => {
 
           <div class="border-t border-border pt-4">
             <h3 class="mb-3 text-sm font-medium text-foreground">{{ t('siteConnections.form.markupSection') }}</h3>
+            <p v-if="editingLegacyMode" class="mb-3 text-sm text-amber-600">{{ t('siteConnections.form.legacyMarkupHint') }}</p>
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.exchangeRate') }}</label>
@@ -458,20 +569,15 @@ onMounted(() => {
                   <SelectContent>
                     <SelectItem value="percent">{{ t('siteConnections.form.markupPercent') }}</SelectItem>
                     <SelectItem value="fixed_amount">{{ t('siteConnections.form.markupFixedAmount') }}</SelectItem>
-                    <SelectItem value="segmented">{{ t('siteConnections.form.markupSegmented') }}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div v-if="form.price_markup_mode === 'segmented'">
-                <label for="price-markup-threshold" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupThreshold') }}</label>
-                <Input id="price-markup-threshold" v-model="form.price_markup_threshold" type="number" step="0.01" min="0.01" required placeholder="0.00" />
-              </div>
-              <div v-if="form.price_markup_mode !== 'percent'">
+              <div v-if="form.price_markup_mode === 'fixed_amount'">
                 <label for="price-markup-amount" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupAmount') }}</label>
                 <Input id="price-markup-amount" v-model="form.price_markup_amount" type="number" step="0.01" min="0" required placeholder="0.00" />
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.priceMarkupAmountHint') }}</p>
               </div>
-              <div v-if="form.price_markup_mode !== 'fixed_amount'">
+              <div v-if="form.price_markup_mode === 'percent'">
                 <label for="price-markup-percent" class="mb-1.5 block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.priceMarkupPercent') }}</label>
                 <div class="relative">
                   <Input id="price-markup-percent" v-model.number="form.price_markup_percent" type="number" step="0.01" min="0" placeholder="0" />
@@ -506,11 +612,42 @@ onMounted(() => {
                 <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.autoSyncPriceHint') }}</p>
               </div>
             </div>
-            <template v-if="form.price_markup_mode === 'segmented'">
-              <p class="mt-3 text-xs text-muted-foreground">{{ t('siteConnections.form.segmentedMarkupHint') }}</p>
-              <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.segmentedWholesaleHint') }}</p>
-            </template>
+
             <p class="mt-3 text-xs text-muted-foreground">{{ t('siteConnections.form.pricingSaveHint') }}</p>
+
+            <div v-if="form.price_markup_mode === 'percent'" class="mt-4">
+              <div class="flex items-center justify-between gap-2">
+                <label class="block text-xs font-medium text-muted-foreground">{{ t('siteConnections.form.categoryMarkups') }}</label>
+                <Button
+                  v-if="isEditing"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="h-7 text-xs"
+                  :disabled="loadingUpstreamCategories"
+                  @click="loadUpstreamCategories"
+                >{{ upstreamCategoriesLoaded ? t('siteConnections.form.categoryMarkupsReload') : t('siteConnections.form.categoryMarkupsLoad') }}</Button>
+              </div>
+              <p class="mt-1 text-xs text-muted-foreground">{{ t('siteConnections.form.categoryMarkupsHint') }}</p>
+              <p v-if="!isEditing" class="mt-2 text-xs text-amber-600">{{ t('siteConnections.form.categoryMarkupsSaveFirst') }}</p>
+              <p v-else-if="upstreamCategoriesLoaded && !upstreamCategoriesSupported" class="mt-2 text-xs text-amber-600">{{ t('siteConnections.form.categoryMarkupsUnsupported') }}</p>
+              <p v-else-if="upstreamCategoriesLoaded && categoryRows.length === 0" class="mt-2 text-xs text-muted-foreground">{{ t('siteConnections.form.categoryMarkupsEmpty') }}</p>
+              <div v-else-if="categoryRows.length > 0" class="mt-2 max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+                <div v-for="row in categoryRows" :key="row.category.id" class="flex items-center gap-3 px-3 py-2">
+                  <span class="min-w-0 flex-1 truncate text-sm text-foreground" :style="{ paddingLeft: `${row.depth * 16}px` }">{{ getLocalizedText(row.category.name) }}</span>
+                  <div class="relative w-32 shrink-0">
+                    <Input
+                      v-model.number="categoryMarkupInputs[String(row.category.id)]"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      :placeholder="t('siteConnections.form.categoryMarkupsDefaultPlaceholder')"
+                    />
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:justify-end">

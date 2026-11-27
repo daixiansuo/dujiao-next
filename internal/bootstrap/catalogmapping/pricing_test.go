@@ -2,16 +2,19 @@ package catalogmappingbootstrap
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dujiao-next/internal/constants"
 	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 	siteconnectionapp "github.com/dujiao-next/internal/modules/siteconnection/application"
+	siteconnectioncontract "github.com/dujiao-next/internal/modules/siteconnection/contract"
 	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
 	siteconnectiongormstore "github.com/dujiao-next/internal/modules/siteconnection/infrastructure/gormstore"
 	"github.com/dujiao-next/internal/shared/jsonmap"
@@ -23,7 +26,7 @@ import (
 func TestMarkupManualAndScheduledSync(t *testing.T) {
 	for _, scheduled := range []bool{false, true} {
 		for _, autoPrice := range []bool{false, true} {
-			for _, mode := range []string{constants.ConnectionPriceMarkupPercent, constants.ConnectionPriceMarkupFixedAmount, constants.ConnectionPriceMarkupSegmented} {
+			for _, mode := range []string{constants.ConnectionPriceMarkupPercent, constants.ConnectionPriceMarkupFixedAmount} {
 				t.Run(fmt.Sprintf("scheduled=%v/auto=%v/mode=%s", scheduled, autoPrice, mode), func(t *testing.T) {
 					source := upstream.UpstreamProduct{
 						ID: 101, Title: jsonmap.JSON{"zh-CN": "upstream title"}, PriceAmount: "5.00", IsActive: true,
@@ -33,7 +36,13 @@ func TestMarkupManualAndScheduledSync(t *testing.T) {
 						},
 						WholesalePrices: productdomain.WholesalePriceTiers{{SKUID: 201, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.NewFromInt(4))}},
 					}
+					var categoryRequests atomic.Int32
 					handler := func(w http.ResponseWriter, r *http.Request) {
+						if strings.HasSuffix(r.URL.Path, "/categories") {
+							categoryRequests.Add(1)
+							http.Error(w, "categories unavailable", http.StatusServiceUnavailable)
+							return
+						}
 						w.Header().Set("Content-Type", "application/json")
 						if scheduled {
 							listProductsHandler([]upstream.UpstreamProduct{source}, true)(w, r)
@@ -49,8 +58,14 @@ func TestMarkupManualAndScheduledSync(t *testing.T) {
 					}
 					pool.SetMaxOpenConns(1)
 					defer pool.Close()
+					// 固定金额即使保留分类比例，也不能请求分类树或叠加比例。
+					categoryMarkups := jsonmap.JSON(nil)
+					if mode == constants.ConnectionPriceMarkupFixedAmount {
+						categoryMarkups = jsonmap.JSON{"9": 50}
+					}
 					if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]any{
-						"price_markup_mode": mode, "price_markup_amount": "3.00", "price_markup_percent": 40, "price_markup_threshold": "12.00", "exchange_rate": 2, "auto_sync_price": autoPrice,
+						"category_markups":  categoryMarkups,
+						"price_markup_mode": mode, "price_markup_amount": "3.00", "price_markup_percent": 40, "exchange_rate": 2, "auto_sync_price": autoPrice,
 					}).Error; err != nil {
 						t.Fatal(err)
 					}
@@ -80,9 +95,6 @@ func TestMarkupManualAndScheduledSync(t *testing.T) {
 					existingPrice, newPrice, wholesale := "13.00", "17.00", "11.00"
 					if mode == constants.ConnectionPriceMarkupPercent {
 						existingPrice, newPrice, wholesale = "14.00", "19.60", "11.20"
-					}
-					if mode == constants.ConnectionPriceMarkupSegmented {
-						newPrice = "19.60"
 					}
 					if !autoPrice {
 						existingPrice = "10.00"
@@ -134,41 +146,6 @@ func TestMarkupManualAndScheduledSync(t *testing.T) {
 						t.Fatal("reapply must not mutate wholesale tiers")
 					}
 
-					if mode == constants.ConnectionPriceMarkupSegmented {
-						connSvc := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
-						connSvc.SetMarkupReapplier(svc)
-						threshold := money.FromDecimal(decimal.NewFromInt(7))
-						if _, err := connSvc.Update(mapping.ConnectionID, siteconnectionapp.UpdateInput{PriceMarkupThreshold: &threshold}); err != nil {
-							t.Fatal(err)
-						}
-						if err := db.First(&skus[0], skus[0].ID).Error; err != nil {
-							t.Fatal(err)
-						}
-						if skus[0].PriceAmount.String() != "14.00" {
-							t.Fatalf("threshold change did not reapply stored source cost: %+v", skus[0])
-						}
-						if err := db.First(&product, product.ID).Error; err != nil {
-							t.Fatal(err)
-						}
-						if product.WholesalePrices[0].UnitPrice.String() != "11.00" {
-							t.Fatal("save unexpectedly refreshed wholesale")
-						}
-						if scheduled {
-							err = svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200)
-						} else {
-							err = svc.SyncProduct(mapping.ID)
-						}
-						if err != nil {
-							t.Fatal(err)
-						}
-						if err := db.First(&product, product.ID).Error; err != nil {
-							t.Fatal(err)
-						}
-						if len(product.WholesalePrices) != 1 || product.WholesalePrices[0].UnitPrice.String() != "11.20" {
-							t.Fatalf("sync did not refresh wholesale with new threshold: %+v", product.WholesalePrices)
-						}
-					}
-
 					if mode == constants.ConnectionPriceMarkupFixedAmount {
 						// Exercise real save -> local reapply wiring, without any upstream HTTP request.
 						connSvc := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
@@ -189,6 +166,9 @@ func TestMarkupManualAndScheduledSync(t *testing.T) {
 						if product.WholesalePrices[0].UnitPrice.String() != wholesale {
 							t.Fatal("save unexpectedly refreshed wholesale")
 						}
+					}
+					if categoryRequests.Load() != 0 {
+						t.Fatalf("unexpected category API requests: %d", categoryRequests.Load())
 					}
 				})
 			}
@@ -211,6 +191,11 @@ func TestFixedAmountImportPricesAndRollback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			source := upstream.UpstreamProduct{ID: 102, Title: jsonmap.JSON{"zh-CN": "import"}, PriceAmount: tt.base, IsActive: true, SKUs: []upstream.UpstreamSKU{{ID: 301, SKUCode: "IMPORT", PriceAmount: tt.sku, IsActive: true}}}
 			svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "import.db"), func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/categories") {
+					t.Error("fixed amount import requested categories")
+					http.Error(w, "unavailable", 503)
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": source})
 			})
@@ -221,7 +206,7 @@ func TestFixedAmountImportPricesAndRollback(t *testing.T) {
 			}
 			pool.SetMaxOpenConns(1)
 			defer pool.Close()
-			if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]any{"price_markup_mode": "fixed_amount", "price_markup_amount": "3.00", "exchange_rate": 2}).Error; err != nil {
+			if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]any{"price_markup_mode": "fixed_amount", "price_markup_amount": "3.00", "exchange_rate": 2, "category_markups": jsonmap.JSON{"9": 50}}).Error; err != nil {
 				t.Fatal(err)
 			}
 			imported, err := svc.ImportUpstreamProduct(mapping.ConnectionID, 102, 1, "")
@@ -317,124 +302,24 @@ func TestFixedMarkupSyncDoesNotTreatInvalidSourcePriceAsZero(t *testing.T) {
 	}
 }
 
-func TestSegmentedImportAndSyncWholesalePricing(t *testing.T) {
-	source := upstream.UpstreamProduct{
-		ID: 102, Title: jsonmap.JSON{"zh-CN": "segmented import"}, PriceAmount: "8.00", IsActive: true,
-		SKUs: []upstream.UpstreamSKU{
-			{ID: 301, SKUCode: "SEGMENT-A", PriceAmount: "8.00", IsActive: true, StockQuantity: 100},
-			{ID: 302, SKUCode: "SEGMENT-B", PriceAmount: "7.50", IsActive: true, StockQuantity: 100},
-		},
-		WholesalePrices: productdomain.WholesalePriceTiers{
-			{SKUID: 301, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.RequireFromString("7.55"))},
-			{SKUID: 301, MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.RequireFromString("7.50"))},
-			{SKUID: 301, MinQuantity: 20, UnitPrice: money.FromDecimal(decimal.RequireFromString("7.00"))},
-		},
-	}
-	svc, db, originalMapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "segmented.db"), func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": source})
-	})
-	defer cleanup()
-	pool, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool.SetMaxOpenConns(1)
-	defer pool.Close()
-	connSvc := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
-	mode := constants.ConnectionPriceMarkupSegmented
-	threshold := money.FromDecimal(decimal.NewFromInt(15))
-	amount := money.FromDecimal(decimal.NewFromInt(5))
-	percent, exchangeRate := 30.0, 2.0
-	if _, err := connSvc.Update(originalMapping.ConnectionID, siteconnectionapp.UpdateInput{
-		PriceMarkupMode: &mode, PriceMarkupThreshold: &threshold, PriceMarkupAmount: &amount,
-		PriceMarkupPercent: &percent, ExchangeRate: &exchangeRate,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	mapping, err := svc.ImportUpstreamProduct(originalMapping.ConnectionID, source.ID, 1, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var product productdomain.Product
-	if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
-		t.Fatal(err)
-	}
-	var skus []productdomain.ProductSKU
-	if err := db.Where("product_id = ?", product.ID).Order("id").Find(&skus).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(skus) != 2 || product.PriceAmount.String() != "20.00" || product.CostPriceAmount.String() != "15.00" || skus[0].PriceAmount.String() != "20.80" || skus[1].PriceAmount.String() != "20.00" || skus[0].CostPriceAmount.String() != "16.00" || skus[1].CostPriceAmount.String() != "15.00" {
-		t.Fatalf("import did not price each SKU by its converted cost: %+v / %+v", product, skus)
-	}
-	if len(product.WholesalePrices) != 2 || product.WholesalePrices[0].MinQuantity != 5 || product.WholesalePrices[0].UnitPrice.String() != "19.63" || product.WholesalePrices[1].MinQuantity != 20 || product.WholesalePrices[1].UnitPrice.String() != "19.00" {
-		t.Fatalf("unexpected imported wholesale tiers: %+v", product.WholesalePrices)
-	}
-	for _, tt := range []struct {
-		quantity int
-		want     string
-	}{{1, "20.80"}, {5, "19.63"}, {10, "19.63"}, {20, "19.00"}} {
-		unitPrice, _, _ := productdomain.ResolveWholesaleUnitPriceForSKU(&product, skus[0].PriceAmount.Decimal, skus[0].ID, skus[0].SKUCode, tt.quantity, tt.quantity)
-		if unitPrice.StringFixed(2) != tt.want {
-			t.Fatalf("quantity %d: got %s, want %s", tt.quantity, unitPrice, tt.want)
-		}
-	}
-	// AutoSyncPrice is false: a repeated sync refreshes the same wholesale prices without touching manually maintained ordinary prices.
-	for range 2 {
-		if err := svc.SyncProduct(mapping.ID); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.First(&product, product.ID).Error; err != nil {
-			t.Fatal(err)
-		}
-		if product.PriceAmount.String() != "20.00" || product.CostPriceAmount.String() != "15.00" || len(product.WholesalePrices) != 2 || product.WholesalePrices[0].UnitPrice.String() != "19.63" || product.WholesalePrices[1].UnitPrice.String() != "19.00" {
-			t.Fatalf("sync changed or compounded segmented prices: %+v", product)
-		}
-	}
-	// Missing upstream tiers preserve the local set, as before.
-	source.WholesalePrices = nil
-	if err := svc.SyncProduct(mapping.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(&product, product.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(product.WholesalePrices) != 2 || product.WholesalePrices[0].UnitPrice.String() != "19.63" {
-		t.Fatalf("missing upstream tiers cleared local prices: %+v", product.WholesalePrices)
-	}
-	// Invalid source tiers must also preserve the previous local configuration.
-	source.WholesalePrices = productdomain.WholesalePriceTiers{
-		{SKUID: 301, MinQuantity: 5, UnitPrice: money.FromDecimal(decimal.RequireFromString("7.50"))},
-		{SKUID: 301, MinQuantity: 10, UnitPrice: money.FromDecimal(decimal.RequireFromString("7.55"))},
-	}
-	if err := svc.SyncProduct(mapping.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(&product, product.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(product.WholesalePrices) != 2 || product.WholesalePrices[0].UnitPrice.String() != "19.63" {
-		t.Fatalf("invalid upstream tiers replaced local prices: %+v", product.WholesalePrices)
-	}
-}
-
-func TestSegmentedImportSummarizesActiveSKUsAcrossThreshold(t *testing.T) {
+// 旧分段连接仍同步库存和上下架；明确转换以前不允许改价、导入或创建新 SKU。
+func TestLegacyMarkupSyncPreservesPrices(t *testing.T) {
 	for _, scheduled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("scheduled=%v", scheduled), func(t *testing.T) {
-			source := upstream.UpstreamProduct{
-				ID: 102, Title: jsonmap.JSON{"zh-CN": "segmented threshold reversal"}, PriceAmount: "15.00", IsActive: true,
-				SKUs: []upstream.UpstreamSKU{
-					{ID: 301, SKUCode: "DISABLED", PriceAmount: "1.00", IsActive: false},
-					{ID: 302, SKUCode: "AT-THRESHOLD", PriceAmount: "15.00", IsActive: true},
-					{ID: 303, SKUCode: "ABOVE-THRESHOLD", PriceAmount: "15.01", IsActive: true},
-				},
-			}
-			svc, db, originalMapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "threshold.db"), func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/upstream/products" {
+			source := upstream.UpstreamProduct{ID: 101, PriceAmount: "5.00", IsActive: true, SKUs: []upstream.UpstreamSKU{
+				{ID: 201, SKUCode: "SKU-A", PriceAmount: "5.00", IsActive: false, StockQuantity: 9},
+				{ID: 202, SKUCode: "NEW", PriceAmount: "8.00", IsActive: true, StockQuantity: 20},
+			}}
+			svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "legacy.db"), func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/categories") {
+					t.Error("legacy mode requested categories")
+					http.Error(w, "unavailable", 503)
+					return
+				}
+				if scheduled {
 					listProductsHandler([]upstream.UpstreamProduct{source}, true)(w, r)
 					return
 				}
-				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": source})
 			})
 			defer cleanup()
@@ -442,167 +327,106 @@ func TestSegmentedImportSummarizesActiveSKUsAcrossThreshold(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pool.SetMaxOpenConns(1)
 			defer pool.Close()
-			connSvc := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
-			mode := constants.ConnectionPriceMarkupSegmented
-			threshold := money.FromDecimal(decimal.NewFromInt(15))
-			amount := money.FromDecimal(decimal.NewFromInt(5))
-			percent, exchangeRate := 30.0, 1.0
-			if _, err := connSvc.Update(originalMapping.ConnectionID, siteconnectionapp.UpdateInput{
-				PriceMarkupMode: &mode, PriceMarkupThreshold: &threshold, PriceMarkupAmount: &amount,
-				PriceMarkupPercent: &percent, ExchangeRate: &exchangeRate,
-			}); err != nil {
+			if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]any{"price_markup_mode": "segmented", "auto_sync_price": true, "price_markup_percent": 40, "price_markup_amount": "3.00"}).Error; err != nil {
 				t.Fatal(err)
 			}
-			mapping, err := svc.ImportUpstreamProduct(originalMapping.ConnectionID, source.ID, 1, "")
+			if scheduled {
+				err = svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200)
+			} else {
+				err = svc.SyncProduct(mapping.ID)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertSummary := func() {
-				t.Helper()
-				var product productdomain.Product
-				if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
-					t.Fatal(err)
-				}
-				// Minimum sale price and minimum cost come from different active SKUs.
-				if product.PriceAmount.String() != "19.51" || product.CostPriceAmount.String() != "15.00" {
-					t.Fatalf("summary must independently use minimum active SKU price/cost: %+v", product)
-				}
-			}
 			var skus []productdomain.ProductSKU
-			if err := db.Where("product_id = ?", mapping.LocalProductID).Order("id").Find(&skus).Error; err != nil {
+			if err := db.Where("product_id = ?", mapping.LocalProductID).Find(&skus).Error; err != nil {
 				t.Fatal(err)
 			}
-			if len(skus) != len(source.SKUs) {
-				t.Fatalf("got %d SKUs, want %d", len(skus), len(source.SKUs))
+			if len(skus) != 1 || skus[0].PriceAmount.String() != "10.00" || skus[0].IsActive {
+				t.Fatalf("legacy sync changed price or failed to sync status: %+v", skus)
 			}
-			for i, want := range []struct{ price, cost string }{{"6.00", "1.00"}, {"20.00", "15.00"}, {"19.51", "15.01"}} {
-				if skus[i].SKUCode != source.SKUs[i].SKUCode || skus[i].IsActive != source.SKUs[i].IsActive || skus[i].PriceAmount.String() != want.price || skus[i].CostPriceAmount.String() != want.cost {
-					t.Fatalf("SKU %s price, cost or active status changed: %+v", source.SKUs[i].SKUCode, skus[i])
-				}
-			}
-			var initialSnapshot mappingdomain.SKUMapping
-			if err := db.Where("product_mapping_id = ? AND local_sku_id = ?", mapping.ID, skus[0].ID).First(&initialSnapshot).Error; err != nil {
+			var snapshot mappingdomain.SKUMapping
+			if err := db.Where("product_mapping_id = ?", mapping.ID).First(&snapshot).Error; err != nil {
 				t.Fatal(err)
 			}
-			if initialSnapshot.UpstreamSKUID != source.SKUs[0].ID || initialSnapshot.UpstreamIsActive {
-				t.Fatalf("imported disabled SKU must retain its inactive source snapshot: %+v", initialSnapshot)
+			if snapshot.UpstreamStock != 9 {
+				t.Fatalf("stock not refreshed: %+v", snapshot)
 			}
-			assertSummary()
-			// Unchanged source costs and rules must leave the imported summary stable.
-			for range 2 {
-				if _, err := svc.ReapplyMarkup(mapping.ConnectionID); err != nil {
-					t.Fatal(err)
-				}
-				assertSummary()
+			if _, err := svc.ReapplyMarkup(mapping.ConnectionID); !errors.Is(err, siteconnectioncontract.ErrInvalid) {
+				t.Fatalf("legacy reapply: %v", err)
 			}
-			// New upstream SKUs must preserve their disabled state on both sync paths.
-			autoPrice := true
-			if _, err := connSvc.Update(mapping.ConnectionID, siteconnectionapp.UpdateInput{AutoSyncPrice: &autoPrice}); err != nil {
-				t.Fatal(err)
+			if _, err := svc.ReapplyMarkupLocal(mapping.ConnectionID); !errors.Is(err, siteconnectioncontract.ErrInvalid) {
+				t.Fatalf("legacy local reapply: %v", err)
 			}
-			source.SKUs = append(source.SKUs, upstream.UpstreamSKU{
-				ID: 304, SKUCode: "NEW-DISABLED", PriceAmount: "0.50", IsActive: false, StockQuantity: 100,
-			})
-			for range 2 {
-				if scheduled {
-					err = svc.SyncConnectionStock(mapping.ConnectionID, []mappingdomain.Mapping{*mapping}, 50, 200)
-				} else {
-					err = svc.SyncProduct(mapping.ID)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				var newSKU productdomain.ProductSKU
-				if err := db.Where("product_id = ? AND sku_code = ?", mapping.LocalProductID, "NEW-DISABLED").First(&newSKU).Error; err != nil {
-					t.Fatal(err)
-				}
-				if newSKU.IsActive || newSKU.PriceAmount.String() != "5.50" || newSKU.CostPriceAmount.String() != "0.50" {
-					t.Fatalf("new disabled SKU must retain its status and converted prices: %+v", newSKU)
-				}
-				assertSummary()
-				var snapshot mappingdomain.SKUMapping
-				if err := db.Where("product_mapping_id = ? AND local_sku_id = ?", mapping.ID, newSKU.ID).First(&snapshot).Error; err != nil {
-					t.Fatal(err)
-				}
-				if snapshot.UpstreamSKUID != 304 || snapshot.UpstreamIsActive || snapshot.UpstreamPrice.String() != "0.50" {
-					t.Fatalf("new disabled SKU source snapshot changed: %+v", snapshot)
-				}
-				var count int64
-				if err := db.Model(&productdomain.ProductSKU{}).Where("product_id = ?", mapping.LocalProductID).Count(&count).Error; err != nil {
-					t.Fatal(err)
-				}
-				if count != int64(len(source.SKUs)) {
-					t.Fatalf("repeated sync created duplicate or missing SKUs: got %d, want %d", count, len(source.SKUs))
-				}
+			if _, err := svc.ImportUpstreamProduct(mapping.ConnectionID, 102, 1, ""); !errors.Is(err, siteconnectioncontract.ErrInvalid) {
+				t.Fatalf("legacy import: %v", err)
 			}
 		})
 	}
 }
 
-func TestSegmentedImportPreservesProductFallback(t *testing.T) {
-	for _, tt := range []struct {
-		name          string
-		skus          []upstream.UpstreamSKU
-		wantSKUPrice  string
-		wantSKUCost   string
-		wantSKUActive bool
-	}{
-		{
-			name:         "no active upstream SKU",
-			skus:         []upstream.UpstreamSKU{{ID: 301, SKUCode: "DISABLED", PriceAmount: "1.00", IsActive: false}},
-			wantSKUPrice: "6.00", wantSKUCost: "1.00", wantSKUActive: false,
-		},
-		{
-			name:         "no upstream SKU keeps product cost despite zero-cost default SKU",
-			wantSKUPrice: "20.00", wantSKUCost: "0.00", wantSKUActive: true,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			source := upstream.UpstreamProduct{
-				ID: 102, Title: jsonmap.JSON{"zh-CN": "segmented fallback"}, PriceAmount: "15.00", IsActive: true, SKUs: tt.skus,
-			}
-			svc, db, originalMapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "fallback.db"), func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": source})
+// 两个批量入口都必须沿用单条导入的模式边界，而非仅按闲置分类比例决定预取。
+func TestBatchImportMarkupModeIsolation(t *testing.T) {
+	for _, byCategory := range []bool{false, true} {
+		for _, mode := range []string{"fixed_amount", "segmented"} {
+			t.Run(fmt.Sprintf("category=%v/mode=%s", byCategory, mode), func(t *testing.T) {
+				source := upstream.UpstreamProduct{ID: 102, CategoryID: 9, Title: jsonmap.JSON{"zh-CN": "import"}, PriceAmount: "5.00", IsActive: true, SKUs: []upstream.UpstreamSKU{{ID: 301, SKUCode: "BATCH", PriceAmount: "5.00", IsActive: true}}}
+				var categoryRequests atomic.Int32
+				svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "batch.db"), func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasSuffix(r.URL.Path, "/categories") {
+						categoryRequests.Add(1)
+						http.Error(w, "unavailable", 503)
+						return
+					}
+					if strings.HasSuffix(r.URL.Path, "/products") {
+						listProductsHandler([]upstream.UpstreamProduct{source}, true)(w, r)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "product": source})
+				})
+				defer cleanup()
+				pool, err := db.DB()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer pool.Close()
+				if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]any{"price_markup_mode": mode, "price_markup_amount": "3.00", "exchange_rate": 2, "category_markups": jsonmap.JSON{"9": 50}}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if byCategory {
+					result, importErr := svc.BatchImportByCategory(mapping.ConnectionID, 9, false, 1)
+					err = importErr
+					if mode == "fixed_amount" && (result == nil || result.SuccessCount != 1) {
+						t.Fatalf("batch category: %+v, %v", result, err)
+					}
+				} else {
+					result, importErr := svc.BatchImportUpstreamProducts(mapping.ConnectionID, []uint{102}, 1, false)
+					err = importErr
+					if mode == "fixed_amount" && (len(result) != 1 || result[0].Err != nil) {
+						t.Fatalf("batch IDs: %+v, %v", result, err)
+					}
+				}
+				if mode == "segmented" {
+					if !errors.Is(err, siteconnectioncontract.ErrInvalid) {
+						t.Fatalf("legacy batch: %v", err)
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					var product productdomain.Product
+					if err := db.Where("id <> ?", mapping.LocalProductID).First(&product).Error; err != nil {
+						t.Fatal(err)
+					}
+					if product.PriceAmount.String() != "13.00" || product.CostPriceAmount.String() != "10.00" {
+						t.Fatalf("wrong batch price: %+v", product)
+					}
+				}
+				if categoryRequests.Load() != 0 {
+					t.Fatalf("unexpected category requests: %d", categoryRequests.Load())
+				}
 			})
-			defer cleanup()
-			pool, err := db.DB()
-			if err != nil {
-				t.Fatal(err)
-			}
-			pool.SetMaxOpenConns(1)
-			defer pool.Close()
-			connSvc := siteconnectionapp.NewService(siteconnectiongormstore.New(db), "test-secret-key", t.TempDir())
-			mode := constants.ConnectionPriceMarkupSegmented
-			threshold := money.FromDecimal(decimal.NewFromInt(15))
-			amount := money.FromDecimal(decimal.NewFromInt(5))
-			percent, exchangeRate := 30.0, 1.0
-			if _, err := connSvc.Update(originalMapping.ConnectionID, siteconnectionapp.UpdateInput{
-				PriceMarkupMode: &mode, PriceMarkupThreshold: &threshold, PriceMarkupAmount: &amount,
-				PriceMarkupPercent: &percent, ExchangeRate: &exchangeRate,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			mapping, err := svc.ImportUpstreamProduct(originalMapping.ConnectionID, source.ID, 1, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			var product productdomain.Product
-			if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
-				t.Fatal(err)
-			}
-			if product.PriceAmount.String() != "20.00" || product.CostPriceAmount.String() != "15.00" {
-				t.Fatalf("import must preserve product-level fallback price/cost: %+v", product)
-			}
-			var skus []productdomain.ProductSKU
-			if err := db.Where("product_id = ?", product.ID).Find(&skus).Error; err != nil {
-				t.Fatal(err)
-			}
-			if len(skus) != 1 || skus[0].PriceAmount.String() != tt.wantSKUPrice || skus[0].CostPriceAmount.String() != tt.wantSKUCost || skus[0].IsActive != tt.wantSKUActive {
-				t.Fatalf("import changed fallback SKU behavior: %+v", skus)
-			}
-		})
+		}
 	}
 }

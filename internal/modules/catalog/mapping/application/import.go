@@ -12,6 +12,7 @@ import (
 	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 	productcontract "github.com/dujiao-next/internal/modules/catalog/product/contract"
 	siteconnectioncontract "github.com/dujiao-next/internal/modules/siteconnection/contract"
+	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
 
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/logger"
@@ -53,16 +54,24 @@ func (s *Service) ImportUpstreamProductWithAutoCategory(connectionID uint, upstr
 	return s.importUpstreamProduct(connectionID, upstreamProductID, categoryID, slug, autoCreateCategory, nil)
 }
 
-// importUpstreamProduct 内部导入实现。catMap 可由批量入口预先注入以避免 N+1 的上游 ListCategories 调用；
-// 为 nil 时在需要时单次拉取。
-func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uint, categoryID uint, slug string, autoCreateCategory bool, catMap map[uint]upstream.UpstreamCategory) (*mappingdomain.Mapping, error) {
-	// 检查是否已存在映射
+// ensureNoMapping 导入前确认该上游商品还没有映射。
+func (s *Service) ensureNoMapping(connectionID, upstreamProductID uint) error {
 	existing, err := s.mappings.GetByConnectionAndUpstreamID(connectionID, upstreamProductID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if existing != nil {
-		return nil, mappingcontract.ErrMappingAlreadyExists
+		return mappingcontract.ErrMappingAlreadyExists
+	}
+	return nil
+}
+
+// importUpstreamProduct 内部导入实现（按 ID 拉取上游商品）。catMap 可由批量入口预先注入
+// 以避免 N+1 的上游 ListCategories 调用；为 nil 时在需要时单次拉取。
+func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uint, categoryID uint, slug string, autoCreateCategory bool, catMap map[uint]upstream.UpstreamCategory) (*mappingdomain.Mapping, error) {
+	// 检查是否已存在映射
+	if err := s.ensureNoMapping(connectionID, upstreamProductID); err != nil {
+		return nil, err
 	}
 
 	// 获取连接
@@ -72,6 +81,11 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 	}
 	if conn == nil {
 		return nil, siteconnectioncontract.ErrNotFound
+	}
+
+	// 旧分段及未知模式必须先明确转换，避免发起无意义的上游请求。
+	if !supportedPriceMarkupMode(conn) {
+		return nil, siteconnectioncontract.ErrInvalid
 	}
 
 	// 获取适配器
@@ -100,6 +114,20 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		return nil, mappingcontract.ErrUpstreamProductNotFound
 	}
 
+	return s.importUpstreamProductData(connectionID, conn, adapter, upProduct, categoryID, slug, autoCreateCategory, catMap)
+}
+
+// importUpstreamProductData 用已经拿到的上游商品数据完成导入。
+// 按分类批量导入时商品列表里已经是完整商品（含 SKU、内容、图片），走这里可以省掉
+// 每个商品一次 GetProduct —— 上游默认 60 次/分钟，逐商品请求会让大批量导入半路被限流。
+// 调用方负责确认映射尚不存在，且传入的商品必须处于上架状态。
+func (s *Service) importUpstreamProductData(connectionID uint, conn *siteconnectiondomain.Connection, adapter upstream.Adapter, upProduct *upstream.UpstreamProduct, categoryID uint, slug string, autoCreateCategory bool, catMap map[uint]upstream.UpstreamCategory) (*mappingdomain.Mapping, error) {
+	if !supportedPriceMarkupMode(conn) {
+		return nil, siteconnectioncontract.ErrInvalid
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	if autoCreateCategory && categoryID == 0 && upProduct.CategoryID > 0 {
 		if catMap == nil {
 			fetched, fetchErr := s.fetchUpstreamCategoryMap(ctx, adapter)
@@ -114,6 +142,11 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		}
 		categoryID = category.ID
 	}
+	// 自动创建分类依赖上游分类；上游商品本身没有分类时无法推断，
+	// 若继续导入会得到无分类（无法上架）的商品，所以让这一条失败并提示手动指定。
+	if autoCreateCategory && categoryID == 0 && upProduct.CategoryID == 0 {
+		return nil, mappingcontract.ErrUpstreamProductNoCategory
+	}
 	if err := productdomain.ValidateCategoryAssignment(s.categories, categoryID, 0, productcontract.ErrProductCategoryInvalid); err != nil {
 		return nil, err
 	}
@@ -127,12 +160,26 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 	// 确定交付类型：上游商品映射后统一使用 upstream 类型
 	fulfillmentType := constants.FulfillmentTypeUpstream
 
-	// 先确定源价格，再换汇、加价，避免固定加价掩盖商品零价的 SKU 兜底。
+	// 解析价格（先汇率转换，再应用加价比例）
 	exchangeRate := conn.ExchangeRate
-	markupPercent := conn.PriceMarkupPercent
-	markupAmount := conn.PriceMarkupAmount.Decimal
-	markupThreshold := conn.PriceMarkupThreshold.Decimal
-	markupMode := conn.PriceMarkupMode
+	// 加价按上游分类解析：分类自身 → 父分类 → 连接默认加价。
+	// 配置了分类加价却拿不到分类树时，宁可整条导入失败，也不能按默认加价把价格写低。
+	var categoryParents map[uint]uint
+	if usesCategoryMarkup(conn) {
+		if catMap != nil {
+			categoryParents = make(map[uint]uint, len(catMap))
+			for id, c := range catMap {
+				categoryParents[id] = c.ParentID
+			}
+		} else {
+			parents, ok := s.upstreamCategoryParents(ctx, adapter, conn)
+			if !ok {
+				return nil, mappingcontract.ErrUpstreamCategoryUnavailable
+			}
+			categoryParents = parents
+		}
+	}
+	markupPercent := ResolveCategoryMarkup(conn.PriceMarkupPercent, conn.CategoryMarkups, upProduct.CategoryID, categoryParents)
 	roundingMode := conn.PriceRoundingMode
 
 	upstreamPrice, priceErr := decimal.NewFromString(upProduct.PriceAmount)
@@ -150,15 +197,19 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		}
 	}
 	costPriceAmount := convertCurrency(upstreamPrice, exchangeRate)
-	priceAmount := CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
+	priceAmount := CalculateLocalPrice(upstreamPrice, exchangeRate, markupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, roundingMode)
 
 	// 未指定 slug 时优先沿用上游 slug，不可用再回退自动生成
 	if slug == "" {
-		slug, err = s.pickImportSlug(upProduct.Slug, connectionID, upstreamProductID)
-		if err != nil {
-			return nil, err
+		picked, pickErr := s.pickImportSlug(upProduct.Slug, connectionID, upProduct.ID)
+		if pickErr != nil {
+			return nil, pickErr
 		}
+		slug = picked
 	}
+
+	// 上游导入的对接商品默认不参与返利：利润空间由上游定价决定，不能悄悄跟随全站比例；需要返利时由管理员手动开启。
+	zeroAffiliateRate := money.FromDecimal(decimal.Zero)
 
 	// 创建本地商品
 	product := productdomain.Product{
@@ -179,6 +230,7 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		ManualStockTotal:     0,
 		IsMapped:             true,
 		IsActive:             false, // 默认下架，管理员手动上架
+		AffiliateRatePercent: &zeroAffiliateRate,
 		SortOrder:            0,
 	}
 
@@ -194,10 +246,11 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		localSKUs := make([]productdomain.ProductSKU, 0, len(upProduct.SKUs))
 		for _, upSKU := range upProduct.SKUs {
 			skuPrice, skuPriceErr := decimal.NewFromString(upSKU.PriceAmount)
-			if skuPriceErr != nil {
-				return fmt.Errorf("parse upstream sku %d price: %w", upSKU.ID, skuPriceErr)
+			if skuPriceErr != nil || skuPrice.IsNegative() {
+				return fmt.Errorf("parse upstream sku %d price: %v", upSKU.ID, skuPriceErr)
 			}
-			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
+
+			localPrice := CalculateLocalPrice(skuPrice, exchangeRate, markupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, roundingMode)
 			localSKU := productdomain.ProductSKU{
 				ProductID:       product.ID,
 				SKUCode:         upSKU.SKUCode,
@@ -229,30 +282,8 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 			localSKUs = append(localSKUs, defaultSKU)
 		}
 
-		// 分段加价可能颠倒 SKU 售价高低，商品概要价需与最低启用 SKU 保持一致。
-		if markupMode == constants.ConnectionPriceMarkupSegmented && len(upProduct.SKUs) > 0 && setMinActiveSKUPrices(&product, localSKUs) {
-			if err := repos.Products.QuickUpdate(
-				fmt.Sprintf("%d", product.ID),
-				map[string]interface{}{
-					"price_amount":      product.PriceAmount,
-					"cost_price_amount": product.CostPriceAmount,
-				},
-			); err != nil {
-				return fmt.Errorf("update local product prices: %w", err)
-			}
-		}
-
 		if len(upProduct.WholesalePrices) > 0 {
-			wholesalePrices := convertUpstreamWholesalePrices(
-				upProduct.WholesalePrices,
-				exchangeRate,
-				markupPercent,
-				markupAmount,
-				markupThreshold,
-				markupMode,
-				roundingMode,
-				buildUpstreamWholesaleSKUIndex(localSKUs, upProduct.SKUs, nil),
-			)
+			wholesalePrices := convertUpstreamWholesalePrices(upProduct.WholesalePrices, exchangeRate, markupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, roundingMode, buildUpstreamWholesaleSKUIndex(localSKUs, upProduct.SKUs, nil))
 			product.WholesalePrices = wholesalePrices
 			if err := repos.Products.QuickUpdate(
 				fmt.Sprintf("%d", product.ID),
@@ -272,7 +303,8 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 		mapping = &mappingdomain.Mapping{
 			ConnectionID:            connectionID,
 			LocalProductID:          product.ID,
-			UpstreamProductID:       upstreamProductID,
+			UpstreamProductID:       upProduct.ID,
+			UpstreamCategoryID:      upProduct.CategoryID,
 			UpstreamFulfillmentType: upstreamFulfillmentType,
 			IsActive:                true,
 			LastSyncedAt:            &now,
@@ -291,43 +323,52 @@ func (s *Service) importUpstreamProduct(connectionID uint, upstreamProductID uin
 	return mapping, nil
 }
 
+// upstreamCategoryParents 返回「上游分类 ID → 父分类 ID」，供分类加价继承使用。
+//
+// 返回值 ok=false 表示这一轮不能安全地算价：连接配置了分类加价，但分类树拉不到。
+// 此时绝不能退回连接默认加价——那会把「父分类 50%」的商品按 0% 写成成本价卖。
+// 调用方必须跳过改价（库存照常同步），等下一轮再试。
+//
+// 连接没配分类加价时返回 (nil, true)：加价与分类无关，按默认算即可。
+func (s *Service) upstreamCategoryParents(ctx context.Context, adapter upstream.Adapter, conn *siteconnectiondomain.Connection) (map[uint]uint, bool) {
+	if conn == nil {
+		return nil, true
+	}
+	if !supportedPriceMarkupMode(conn) {
+		logger.Warnw("连接加价模式不受支持，跳过本轮改价", "connection_id", conn.ID, "mode", conn.PriceMarkupMode)
+		return nil, false
+	}
+	if !usesCategoryMarkup(conn) {
+		return nil, true
+	}
+	catMap, err := s.fetchUpstreamCategoryMap(ctx, adapter)
+	if err != nil {
+		logger.Warnw("fetch_upstream_category_parents_failed", "connection_id", conn.ID, "error", err)
+		return nil, false
+	}
+	parents := make(map[uint]uint, len(catMap))
+	for id, c := range catMap {
+		parents[id] = c.ParentID
+	}
+	return parents, true
+}
+
 // fetchUpstreamCategoryMap 拉取上游分类列表并构建 ID → 分类映射，供批量导入预取共用。
 func (s *Service) fetchUpstreamCategoryMap(ctx context.Context, adapter upstream.Adapter) (map[uint]upstream.UpstreamCategory, error) {
 	catResult, err := adapter.ListCategories(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// 适配器把分类接口 404 当成「旧版上游不支持」返回空列表；这里不能当成一棵空树，
+	// 否则继承父分类加价的商品会被按默认加价改价。
+	if !catResult.Supported {
+		return nil, errors.New("upstream does not support categories")
+	}
 	catMap := make(map[uint]upstream.UpstreamCategory, len(catResult.Categories))
 	for _, c := range catResult.Categories {
 		catMap[c.ID] = c
 	}
 	return catMap, nil
-}
-
-// createUpstreamSKU 保留上游显式的启用状态，避免创建时的默认值覆盖 false。
-func createUpstreamSKU(skus mappingcontract.ImportTxSKURepository, sku *productdomain.ProductSKU) error {
-	isActive := sku.IsActive
-	if err := skus.Create(sku); err != nil {
-		return err
-	}
-	if sku.IsActive != isActive {
-		sku.IsActive = isActive
-		return skus.Update(sku)
-	}
-	return nil
-}
-
-// createUpstreamSKUMapping 保留上游显式的启用状态，与对应本地 SKU 一致。
-func createUpstreamSKUMapping(skuMappings mappingcontract.ImportTxSKUMappingRepository, mapping *mappingdomain.SKUMapping) error {
-	isActive := mapping.UpstreamIsActive
-	if err := skuMappings.Create(mapping); err != nil {
-		return err
-	}
-	if mapping.UpstreamIsActive != isActive {
-		mapping.UpstreamIsActive = isActive
-		return skuMappings.Update(mapping)
-	}
-	return nil
 }
 
 func createSKUMappings(
@@ -435,7 +476,7 @@ func buildUpstreamWholesaleSKUIndex(localSKUs []productdomain.ProductSKU, upstre
 	return index
 }
 
-func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exchangeRate, markupPercent, markupAmount, markupThreshold decimal.Decimal, markupMode, roundingMode string, indexes ...upstreamWholesaleSKUIndex) productdomain.WholesalePriceTiers {
+func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exchangeRate, markupPercent, markupAmount decimal.Decimal, markupMode, roundingMode string, indexes ...upstreamWholesaleSKUIndex) productdomain.WholesalePriceTiers {
 	if len(tiers) == 0 {
 		return productdomain.WholesalePriceTiers{}
 	}
@@ -455,10 +496,7 @@ func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exc
 			)
 			continue
 		}
-		localPrice := tier.UnitPrice.Decimal
-		if markupMode != constants.ConnectionPriceMarkupSegmented {
-			localPrice = CalculateLocalPrice(localPrice, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
-		}
+		localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, markupAmount, markupMode, roundingMode)
 		if localPrice.LessThanOrEqual(decimal.Zero) {
 			skipped++
 			logger.Warnw("convert_upstream_wholesale_price_invalid",
@@ -486,46 +524,6 @@ func convertUpstreamWholesalePrices(tiers productdomain.WholesalePriceTiers, exc
 			MinQuantity: tier.MinQuantity,
 			UnitPrice:   localPrice,
 		})
-	}
-	if markupMode == constants.ConnectionPriceMarkupSegmented {
-		// 先校验、排序映射后的成本阶梯，避免省略加价后的冗余档位掩盖上游数据错误。
-		sourceTiers, err := productdomain.NormalizeWholesalePrices(converted)
-		if err != nil {
-			logger.Warnw("convert_upstream_wholesale_prices_failed",
-				"error", err,
-				"tier_count", len(tiers),
-				"valid_tier_count", len(converted),
-				"skipped_tier_count", skipped,
-			)
-			return productdomain.WholesalePriceTiers{}
-		}
-		converted = converted[:0]
-		for idx, tier := range sourceTiers {
-			localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, markupAmount, markupThreshold, markupMode, roundingMode)
-			if localPrice.LessThanOrEqual(decimal.Zero) {
-				skipped++
-				logger.Warnw("convert_upstream_wholesale_price_invalid",
-					"index", idx,
-					"min_quantity", tier.MinQuantity,
-					"unit_price", tier.UnitPrice.String(),
-					"local_price", localPrice.String(),
-				)
-				continue
-			}
-			if len(converted) > 0 {
-				previous := converted[len(converted)-1]
-				sameScope := strings.EqualFold(previous.SKUCode, tier.SKUCode) && (tier.SKUCode != "" || previous.SKUID == tier.SKUID)
-				if sameScope && localPrice.GreaterThanOrEqual(previous.UnitPrice) {
-					continue
-				}
-			}
-			converted = append(converted, productdomain.WholesalePriceInput{
-				SKUID:       tier.SKUID,
-				SKUCode:     tier.SKUCode,
-				MinQuantity: tier.MinQuantity,
-				UnitPrice:   localPrice,
-			})
-		}
 	}
 	normalized, err := productdomain.NormalizeWholesalePrices(converted)
 	if err != nil {
@@ -738,28 +736,89 @@ func (s *Service) ListUpstreamCategoryCounts(ctx context.Context, connectionID u
 	return counts, len(products), nil
 }
 
-// maxUpstreamProductPages 全量翻页的页数上限（每页 50 条，即 5 万条商品）。
+// maxUpstreamProductPages 全量翻页的页数上限（每页 200 条，即 20 万条商品）。
 // 上游若忽略 page 参数且 total 异常，翻页条件永远不满足，靠它兜底防止死循环。
 const maxUpstreamProductPages = 1000
 
-// listAllUpstreamProducts 逐页拉取上游全部商品。上游 page_size 上限为 50。
+// upstreamProductPageSize 全量翻页时每页请求的商品数。上游 page_size 上限为 200，
+// 按上限请求能把翻页次数（以及触达上游 60 次/分钟限流的概率）压到四分之一。
+const upstreamProductPageSize = 200
+
+// listAllUpstreamProducts 逐页拉取上游全部商品。
+// 旧版上游会把 page_size 压到 50，所以不能拿"返回条数 < 请求条数"直接判定最后一页，
+// 要先看响应里的总数和 page_size 回声，否则商品多的站点只会拉到第一页。
 func listAllUpstreamProducts(ctx context.Context, adapter upstream.Adapter) ([]upstream.UpstreamProduct, error) {
-	const pageSize = 50
-	var products []upstream.UpstreamProduct
+	products := make([]upstream.UpstreamProduct, 0)
+	seen := make(map[uint]struct{})
 	for page := 1; page <= maxUpstreamProductPages; page++ {
-		pageCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		// 每页超时要能覆盖一次限流重试的等待（上游 Retry-After 可达封禁时长），
+		// 30 秒会被 Retry-After 等待吃光、导致整次翻转以 429 失败。
+		pageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		result, err := adapter.ListProducts(pageCtx, upstream.ListProductsOpts{
 			Page:     page,
-			PageSize: pageSize,
+			PageSize: upstreamProductPageSize,
 		})
 		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("fetch upstream products page %d: %w", page, err)
 		}
-		products = append(products, result.Items...)
-		if len(result.Items) < pageSize || page*pageSize >= result.Total {
+		if len(result.Items) == 0 {
+			// 翻页期间上游可能刚好新增/下架商品，导致 total 与实际可翻到的数量不一致，
+			// 末尾出现空页。三个调用方（按分类导入、分类统计、补分类 ID）少拿个别商品
+			// 都没有害处，直接返回已拿到的商品，避免整次导入因个别商品变动而失败。
 			return products, nil
+		}
+		added := 0
+		for _, p := range result.Items {
+			if _, ok := seen[p.ID]; ok {
+				continue
+			}
+			seen[p.ID] = struct{}{}
+			products = append(products, p)
+			added++
+		}
+		// 某一页没有带来任何新商品：上游（或它前面的缓存）在重复返回同一批数据，
+		// 继续翻页也拿不到新内容。直接返回已拿到的商品，避免按客户端限速跑满页数上限。
+		if added == 0 {
+			return products, nil
+		}
+		if result.Total > 0 && len(products) >= result.Total {
+			return products, nil
+		}
+		// 拿不到 total 时才只能靠"最后一页不满"判断；判断基准用响应回声的 page_size。
+		if result.Total <= 0 {
+			effectivePageSize := result.PageSize
+			if effectivePageSize <= 0 {
+				effectivePageSize = upstreamProductPageSize
+			}
+			if len(result.Items) < effectivePageSize {
+				return products, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("upstream products exceed %d pages", maxUpstreamProductPages)
+}
+
+func createUpstreamSKU(skus mappingcontract.ImportTxSKURepository, sku *productdomain.ProductSKU) error {
+	isActive := sku.IsActive
+	if err := skus.Create(sku); err != nil {
+		return err
+	}
+	if sku.IsActive != isActive {
+		sku.IsActive = isActive
+		return skus.Update(sku)
+	}
+	return nil
+}
+
+func createUpstreamSKUMapping(skuMappings mappingcontract.ImportTxSKUMappingRepository, mapping *mappingdomain.SKUMapping) error {
+	isActive := mapping.UpstreamIsActive
+	if err := skuMappings.Create(mapping); err != nil {
+		return err
+	}
+	if mapping.UpstreamIsActive != isActive {
+		mapping.UpstreamIsActive = isActive
+		return skuMappings.Update(mapping)
+	}
+	return nil
 }
