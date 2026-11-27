@@ -27,19 +27,19 @@ const upstreamBatchScanMinIDs = 50
 // 需要的页数不少于选中数量时就不扫：请求数打平时逐个取下载的数据少得多
 // （大型上游上选 50 个扫全站反而更慢）。
 // 拿不到 total（旧上游）时保持旧行为——选中够多就扫。
-func shouldScanUpstreamProducts(adapter upstream.Adapter, selected int) bool {
+func shouldScanUpstreamProducts(adapter upstream.Adapter, selected, requestedPageSize int) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	result, err := adapter.ListProducts(ctx, upstream.ListProductsOpts{
 		Page:     1,
-		PageSize: upstreamProductPageSize,
+		PageSize: requestedPageSize,
 	})
 	if err != nil || result == nil || result.Total <= 0 {
 		return true
 	}
 	pageSize := result.PageSize
 	if pageSize <= 0 {
-		pageSize = upstreamProductPageSize
+		pageSize = requestedPageSize
 	}
 	pagesNeeded := (result.Total + pageSize - 1) / pageSize
 	return pagesNeeded < selected
@@ -123,8 +123,9 @@ func (s *Service) BatchImportUpstreamProducts(
 	// 选中 50 个就扫全站反而更慢，所以按第一页的 total/page_size 决定。
 	// 扫描失败或某个 ID 不在结果里时，回退到逐个 GetProduct，行为与之前一致。
 	scanned := map[uint]upstream.UpstreamProduct{}
-	if len(upstreamProductIDs) >= upstreamBatchScanMinIDs && shouldScanUpstreamProducts(adapter, len(upstreamProductIDs)) {
-		if allProducts, scanErr := listAllUpstreamProducts(context.Background(), adapter); scanErr == nil {
+	pageSize := s.upstreamScanPageSize()
+	if len(upstreamProductIDs) >= upstreamBatchScanMinIDs && shouldScanUpstreamProducts(adapter, len(upstreamProductIDs), pageSize) {
+		if allProducts, scanErr := listAllUpstreamProducts(context.Background(), adapter, pageSize); scanErr == nil {
 			for _, p := range allProducts {
 				scanned[p.ID] = p
 			}
@@ -198,7 +199,7 @@ func (s *Service) BatchImportByCategory(
 	}
 
 	// 分页拉取上游所有商品，筛选属于目标分类的
-	allProducts, err := listAllUpstreamProducts(context.Background(), adapter)
+	allProducts, err := listAllUpstreamProducts(context.Background(), adapter, s.upstreamScanPageSize())
 	if err != nil {
 		return nil, err
 	}

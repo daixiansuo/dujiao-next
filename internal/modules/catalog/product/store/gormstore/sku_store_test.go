@@ -203,3 +203,58 @@ func TestSKUSyncFieldsPreserveStopAndOptionalPrice(t *testing.T) {
 		})
 	}
 }
+
+func TestSKUUpdatePricesPreservesCurrentSaleStockAndSpecifications(t *testing.T) {
+	store, db := setupSKUStoreTest(t)
+	item := &productdomain.ProductSKU{ProductID: 1, SKUCode: "OLD", PriceAmount: money.FromDecimal(decimal.NewFromInt(10)), CostPriceAmount: money.FromDecimal(decimal.NewFromInt(5)), IsActive: true}
+	if err := store.Create(item); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&productdomain.ProductSKU{}).Where("id = ?", item.ID).Updates(map[string]interface{}{
+		"is_active": false, "sku_code": "EDITED", "spec_values_json": jsonmap.JSON{"version": "current"},
+		"manual_stock_total": 70, "manual_stock_locked": 6, "manual_stock_sold": 4, "sort_order": 99,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, prices := range []struct{ price, cost int64 }{{20, 8}, {0, 0}} {
+		if err := store.UpdatePrices(item.ID, money.FromDecimal(decimal.NewFromInt(prices.price)), money.FromDecimal(decimal.NewFromInt(prices.cost))); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetByID(item.ID)
+		if err != nil || got == nil {
+			t.Fatalf("reload = %+v, %v", got, err)
+		}
+		if !got.PriceAmount.Equal(decimal.NewFromInt(prices.price)) || !got.CostPriceAmount.Equal(decimal.NewFromInt(prices.cost)) {
+			t.Fatalf("prices not written: %+v", got)
+		}
+		if got.IsActive || got.SKUCode != "EDITED" || got.SpecValuesJSON["version"] != "current" || got.ManualStockTotal != 70 || got.ManualStockLocked != 6 || got.ManualStockSold != 4 || got.SortOrder != 99 {
+			t.Fatalf("price update overwrote current SKU fields: %+v", got)
+		}
+	}
+}
+
+func TestSKUUpdatePricesRejectsMissingAndSoftDeletedRows(t *testing.T) {
+	store, db := setupSKUStoreTest(t)
+	for _, id := range []uint{0, 99999} {
+		if err := store.UpdatePrices(id, money.FromDecimal(decimal.NewFromInt(20)), money.FromDecimal(decimal.NewFromInt(8))); err == nil {
+			t.Fatalf("missing SKU %d must return error", id)
+		}
+	}
+	item := &productdomain.ProductSKU{ProductID: 1, SKUCode: "DELETED-PRICE", PriceAmount: money.FromDecimal(decimal.NewFromInt(10)), CostPriceAmount: money.FromDecimal(decimal.NewFromInt(5)), IsActive: true}
+	if err := store.Create(item); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteByProduct(item.ProductID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdatePrices(item.ID, money.FromDecimal(decimal.NewFromInt(20)), money.FromDecimal(decimal.NewFromInt(8))); err == nil {
+		t.Fatal("soft-deleted SKU must return error")
+	}
+	var got productdomain.ProductSKU
+	if err := db.Where("id = ?", item.ID).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.DeletedAt == nil || got.PriceAmount.String() != "10.00" || got.CostPriceAmount.String() != "5.00" {
+		t.Fatalf("soft-deleted prices changed: %+v", got)
+	}
+}

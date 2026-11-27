@@ -107,7 +107,7 @@ const loadUpstreamCategories = async () => {
     upstreamCategories.value = data?.categories || []
     upstreamCategoriesLoaded.value = true
   } catch (err: any) {
-    notifyError(err?.response?.data?.message || err?.message)
+    if (!err?.__notified) notifyError(err?.response?.data?.message || err?.message)
   } finally {
     loadingUpstreamCategories.value = false
   }
@@ -301,7 +301,7 @@ const handleSubmit = async () => {
     const pricingChanged = !isEditing.value || pricingKey(payload) !== pricingSnapshot
     if (savedId && !editingLegacyMode.value && payload.price_markup_mode === 'percent' && pricingChanged && Object.keys(payload.category_markups ?? {}).length > 0) {
       try {
-        const res = await adminAPI.reapplyConnectionMarkup(savedId)
+        const res = await adminAPI.reapplyConnectionMarkup(savedId, { skipErrorNotification: true })
         const count = (res.data?.data as { updated_products?: number } | undefined)?.updated_products ?? 0
         notifySuccess(t('siteConnections.reapplyMarkup.success', { count }))
       } catch (err: any) {
@@ -312,7 +312,7 @@ const handleSubmit = async () => {
       notifySuccess()
     }
   } catch (err: any) {
-    notifyError(err?.response?.data?.message || err?.message)
+    if (!err?.__notified) notifyError(err?.response?.data?.message || err?.message)
   }
 }
 
@@ -323,7 +323,7 @@ const handlePing = async (conn: AdminSiteConnection) => {
     notifySuccess(t('siteConnections.ping.success'))
     fetchConnections(pagination.page)
   } catch (err: any) {
-    notifyError(t('siteConnections.ping.failed') + ': ' + (err?.response?.data?.message || err?.message || ''))
+    if (!err?.__notified) notifyError(t('siteConnections.ping.failed') + ': ' + (err?.response?.data?.message || err?.message || ''))
   } finally {
     pingingId.value = null
   }
@@ -336,7 +336,7 @@ const handleToggleStatus = async (conn: AdminSiteConnection) => {
     fetchConnections(pagination.page)
     notifySuccess()
   } catch (err: any) {
-    notifyError(err?.response?.data?.message || err?.message)
+    if (!err?.__notified) notifyError(err?.response?.data?.message || err?.message)
   }
 }
 
@@ -352,7 +352,7 @@ const handleDelete = async (conn: AdminSiteConnection) => {
     fetchConnections(pagination.page)
     notifySuccess()
   } catch (err: any) {
-    notifyError(err?.response?.data?.message || err?.message)
+    if (!err?.__notified) notifyError(err?.response?.data?.message || err?.message)
   }
 }
 
@@ -368,7 +368,7 @@ const handleReapplyMarkup = async (conn: AdminSiteConnection) => {
     const count = (res.data?.data as Record<string, number>)?.updated_products ?? 0
     notifySuccess(t('siteConnections.reapplyMarkup.success', { count }))
   } catch (err: any) {
-    notifyError(err?.response?.data?.message || err?.message)
+    if (!err?.__notified) notifyError(err?.response?.data?.message || err?.message)
   } finally {
     reapplyingId.value = null
   }

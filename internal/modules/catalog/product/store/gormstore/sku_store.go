@@ -9,6 +9,7 @@ import (
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 
 	"github.com/dujiao-next/internal/persistence/gormutil"
+	"github.com/dujiao-next/internal/shared/money"
 
 	"gorm.io/gorm"
 )
@@ -178,4 +179,18 @@ func (r *SKUStore) UpdateSyncFields(item *productdomain.ProductSKU, applyPrice b
 	return r.db.Model(&productdomain.ProductSKU{}).
 		Where("id = ? AND deleted_at IS NULL", item.ID).
 		Updates(updates).Error
+}
+
+// UpdatePrices 只写售价和成本，保留并发停售、库存及规格修改；记录消失时不能误报成功。
+func (r *SKUStore) UpdatePrices(id uint, price, cost money.Amount) error {
+	result := r.db.Model(&productdomain.ProductSKU{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]interface{}{"price_amount": price, "cost_price_amount": cost})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }

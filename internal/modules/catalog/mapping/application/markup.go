@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -87,47 +89,91 @@ func (s *Service) reapplyMarkupPrices(conn *siteconnectiondomain.Connection, cat
 	if err != nil {
 		return 0, err
 	}
-	hasCategoryMarkups := usesCategoryMarkup(conn)
-
-	updated := 0
-	for _, mapping := range mappings {
-		if categoryParents == nil && hasCategoryMarkups &&
-			(mapping.UpstreamCategoryID == 0 ||
-				categoryMarkupsNeedParents(conn.CategoryMarkups, mapping.UpstreamCategoryID)) {
-			continue
-		}
-		skuMappings, err := s.skuMappings.ListByProductMapping(mapping.ID)
-		if err != nil {
-			continue
-		}
-
-		markupPercent := ResolveCategoryMarkup(conn.PriceMarkupPercent, conn.CategoryMarkups, mapping.UpstreamCategoryID, categoryParents)
-		for _, sm := range skuMappings {
-			newLocalPrice := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, markupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
-			localSKU, err := s.skus.GetByID(sm.LocalSKUID)
-			if err != nil || localSKU == nil {
-				continue
+	unit, ok := s.transactions.(mappingcontract.AvailabilityUnitOfWork)
+	if !ok {
+		return 0, errors.New("markup transaction is required")
+	}
+	started := time.Now()
+	logger.Infow("reapply_markup_started", "connection_id", conn.ID, "mappings", len(mappings))
+	updated, skipped, failed := 0, 0, 0
+	var failures []error
+	for _, candidate := range mappings {
+		applied := false
+		err := unit.WithinAvailabilityTransaction(func(repos mappingcontract.AvailabilityRepositories) error {
+			// 先锁映射再读价格，防止同步或采购拒绝与重算交叉写入；不回写映射状态。
+			mapping, err := repos.Mappings.GetByIDForUpdate(candidate.ID)
+			if err != nil {
+				return err
 			}
-			localSKU.PriceAmount = money.FromDecimal(newLocalPrice.Round(2))
-			localSKU.CostPriceAmount = money.FromDecimal(convertCurrency(sm.UpstreamPrice.Decimal, conn.ExchangeRate).Round(2)) // 成本价 = 上游价格 × 汇率（本地币种）
-			_ = s.skus.Update(localSKU)
+			if mapping == nil || mapping.ConnectionID != conn.ID {
+				return mappingcontract.ErrMappingNotFound
+			}
+			if !mapping.IsActive {
+				return nil
+			}
+			if categoryParents == nil && usesCategoryMarkup(conn) &&
+				(mapping.UpstreamCategoryID == 0 || categoryMarkupsNeedParents(conn.CategoryMarkups, mapping.UpstreamCategoryID)) {
+				return nil
+			}
+			skuMappings, err := repos.SKUMappings.ListByProductMapping(mapping.ID)
+			if err != nil {
+				return err
+			}
+			if len(skuMappings) == 0 {
+				return nil
+			}
+			localProduct, err := repos.Products.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
+			if err != nil {
+				return err
+			}
+			if localProduct == nil {
+				return mappingcontract.ErrMappingNotFound
+			}
+			markupPercent := ResolveCategoryMarkup(conn.PriceMarkupPercent, conn.CategoryMarkups, mapping.UpstreamCategoryID, categoryParents)
+			for _, sm := range skuMappings {
+				sku, err := repos.SKUs.GetByID(sm.LocalSKUID)
+				if err != nil {
+					return err
+				}
+				if sku == nil || sku.ProductID != mapping.LocalProductID {
+					return fmt.Errorf("mapped SKU %d is missing or belongs to another product", sm.LocalSKUID)
+				}
+				price := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, markupPercent, conn.PriceMarkupAmount.Decimal, conn.PriceMarkupMode, conn.PriceRoundingMode)
+				cost := convertCurrency(sm.UpstreamPrice.Decimal, conn.ExchangeRate)
+				if err := repos.SKUs.UpdatePrices(sku.ID, money.FromDecimal(price.Round(2)), money.FromDecimal(cost.Round(2))); err != nil {
+					return fmt.Errorf("update SKU %d prices: %w", sku.ID, err)
+				}
+			}
+			// 汇总也必须读取本事务写入后的 SKU；任一步失败回滚整件商品，不能留下半套价格。
+			bound := &Service{products: repos.Products, skus: repos.SKUs}
+			if err := bound.recalcProductPrice(localProduct); err != nil {
+				return err
+			}
+			applied = true
+			return nil
+		})
+		if err != nil {
+			failed++
+			failures = append(failures, fmt.Errorf("mapping %d: %w", candidate.ID, err))
+			logger.Warnw("reapply_markup_product_failed", "connection_id", conn.ID, "mapping_id", candidate.ID,
+				"product_id", candidate.LocalProductID, "error", err)
+			continue
 		}
-
-		// 更新 Product.PriceAmount
-		localProduct, err := s.products.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
-		if err == nil && localProduct != nil {
-			s.recalcProductPrice(localProduct)
+		if applied {
 			updated++
+		} else {
+			skipped++
 		}
 	}
-
-	return updated, nil
+	logger.Infow("reapply_markup_done", "connection_id", conn.ID, "updated", updated,
+		"skipped", skipped, "failed", failed, "duration_ms", time.Since(started).Milliseconds())
+	return updated, errors.Join(failures...)
 }
 
 // backfillUpstreamCategoryIDs 为还没有上游分类 ID 的旧映射补齐分类 ID（就地修改 mappings）。
 // 一次遍历上游全部商品；没有需要补的映射时不发请求。上游本身未分类的商品拿到的仍是 0，
 // 之后每次重算会再拉一遍，但只发生在配置了分类加价的连接上。
-// 返回 false 表示补齐失败（拿不到上游商品列表），调用方必须放弃这一轮改价。
+// 返回 false 表示列表读取或分类回填写入失败，调用方必须放弃这一轮改价。
 func (s *Service) backfillUpstreamCategoryIDs(ctx context.Context, adapter upstream.Adapter, connectionID uint, mappings []mappingdomain.Mapping) bool {
 	needs := false
 	for i := range mappings {
@@ -139,7 +185,7 @@ func (s *Service) backfillUpstreamCategoryIDs(ctx context.Context, adapter upstr
 	if !needs {
 		return true
 	}
-	products, err := listAllUpstreamProducts(ctx, adapter)
+	products, err := listAllUpstreamProducts(ctx, adapter, s.upstreamScanPageSize())
 	if err != nil {
 		logger.Warnw("backfill_upstream_category_ids_failed", "connection_id", connectionID, "error", err)
 		return false
@@ -162,18 +208,22 @@ func (s *Service) backfillUpstreamCategoryIDs(ctx context.Context, adapter upstr
 		if err := s.mappings.UpdateUpstreamCategoryID(mappings[i].ID, categoryID); err != nil {
 			logger.Warnw("backfill_upstream_category_id_update_failed",
 				"mapping_id", mappings[i].ID, "error", err)
+			return false
 		}
 	}
 	return true
 }
 
 // recalcProductPrice 重新计算商品基准价格和成本价为最低活跃 SKU 价格
-func (s *Service) recalcProductPrice(product *productdomain.Product) {
+func (s *Service) recalcProductPrice(product *productdomain.Product) error {
 	allSKUs, err := s.skus.ListByProduct(product.ID, true)
-	if err != nil || !setMinActiveSKUPrices(product, allSKUs) {
-		return
+	if err != nil {
+		return err
 	}
-	_ = s.products.QuickUpdate(
+	if !setMinActiveSKUPrices(product, allSKUs) {
+		return nil
+	}
+	return s.products.QuickUpdate(
 		strconv.FormatUint(uint64(product.ID), 10),
 		map[string]interface{}{
 			"price_amount":      product.PriceAmount,

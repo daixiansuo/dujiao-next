@@ -2,12 +2,15 @@ package application
 
 import (
 	"context"
+	"errors"
 	"github.com/dujiao-next/internal/constants"
 	"testing"
+	"time"
 
 	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
+	settingsintegration "github.com/dujiao-next/internal/modules/settings/schema/integration"
 
 	"github.com/dujiao-next/internal/shared/money"
 	"github.com/dujiao-next/internal/upstream"
@@ -74,7 +77,7 @@ func (a *pagedProductsAdapter) ListProducts(_ context.Context, opts upstream.Lis
 
 func TestListAllUpstreamProductsWalksEveryPage(t *testing.T) {
 	adapter := &pagedProductsAdapter{total: 120}
-	products, err := listAllUpstreamProducts(context.Background(), adapter)
+	products, err := listAllUpstreamProducts(context.Background(), adapter, 200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,11 +86,46 @@ func TestListAllUpstreamProductsWalksEveryPage(t *testing.T) {
 	}
 }
 
+type scanPageSettingsProvider struct {
+	pageSize int
+	err      error
+}
+
+func (p scanPageSettingsProvider) GetUpstreamSyncConfig(string) (settingsintegration.UpstreamSyncConfig, error) {
+	cfg := settingsintegration.DefaultUpstreamSyncConfig()
+	cfg.SyncPageSize = p.pageSize
+	return cfg, p.err
+}
+
+func (p scanPageSettingsProvider) GetUpstreamSyncInterval(string) (time.Duration, error) {
+	return 5 * time.Minute, p.err
+}
+
+func TestUpstreamScanPageSizeUsesExistingSettingsAndDefault(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		service *Service
+		want    int
+	}{
+		{"no service", nil, 50},
+		{"no settings", &Service{}, 50},
+		{"configured", &Service{settings: scanPageSettingsProvider{pageSize: 30}}, 30},
+		{"invalid configured size", &Service{settings: scanPageSettingsProvider{pageSize: 0}}, 50},
+		{"settings unavailable", &Service{settings: scanPageSettingsProvider{pageSize: 200, err: errors.New("settings unavailable")}}, 50},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.service.upstreamScanPageSize(); got != test.want {
+				t.Fatalf("page size = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 // 旧上游会把 page_size 压到 50：不能把"返回条数 < 请求条数"当成最后一页，
 // 否则商品多的站点只能拉到第一页。
 func TestListAllUpstreamProductsHonorsClampedPageSize(t *testing.T) {
 	adapter := &pagedProductsAdapter{total: 120, clampPageSize: 50}
-	products, err := listAllUpstreamProducts(context.Background(), adapter)
+	products, err := listAllUpstreamProducts(context.Background(), adapter, 200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +155,7 @@ func (a *endlessProductsAdapter) ListProducts(_ context.Context, opts upstream.L
 
 func TestListAllUpstreamProductsStopsAtPageLimit(t *testing.T) {
 	adapter := &endlessProductsAdapter{}
-	if _, err := listAllUpstreamProducts(context.Background(), adapter); err == nil {
+	if _, err := listAllUpstreamProducts(context.Background(), adapter, 200); err == nil {
 		t.Fatal("expected error when upstream pagination never reaches total")
 	}
 	if adapter.calls != maxUpstreamProductPages {
@@ -129,12 +167,12 @@ func TestListAllUpstreamProductsStopsAtPageLimit(t *testing.T) {
 // 不必跑满页数上限。
 func TestListAllUpstreamProductsStopsWhenPageAddsNothing(t *testing.T) {
 	adapter := &pagedProductsAdapter{total: 1 << 30, ignorePage: true}
-	products, err := listAllUpstreamProducts(context.Background(), adapter)
+	products, err := listAllUpstreamProducts(context.Background(), adapter, 200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(products) != upstreamProductPageSize || adapter.calls != 2 {
-		t.Fatalf("expected %d products in 2 calls, got %d in %d", upstreamProductPageSize, len(products), adapter.calls)
+	if len(products) != 200 || adapter.calls != 2 {
+		t.Fatalf("expected %d products in 2 calls, got %d in %d", 200, len(products), adapter.calls)
 	}
 }
 

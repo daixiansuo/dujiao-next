@@ -12,9 +12,9 @@ interface NotifiedError extends Error {
   __notified?: boolean
 }
 
-const createNotifiedError = (message: string): NotifiedError => {
+const createNotifiedError = (message: string, notified = true): NotifiedError => {
   const error = new Error(message) as NotifiedError
-  error.__notified = true
+  if (notified) error.__notified = true
   return error
 }
 
@@ -28,7 +28,9 @@ const redirectToLogin = () => {
 
 const isLoginEndpoint = (url: string) => /\/admin\/login\b/.test(url)
 
-interface RequestOptions {
+export interface RequestOptions {
+  // 由调用页面组合完整业务提示时关闭通用 toast，错误仍然向上传递。
+  skipErrorNotification?: boolean
   params?: Record<string, any>
   headers?: Record<string, string>
   blob?: boolean
@@ -101,6 +103,11 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
     opts = options || {}
   }
 
+  const rejectRequest = (message: string) => {
+    if (!opts.skipErrorNotification) notifyError(message)
+    return Promise.reject(createNotifiedError(message, !opts.skipErrorNotification))
+  }
+
   const url = buildUrl(baseURL, path, opts.params)
   const headers: Record<string, string> = { ...opts.headers }
 
@@ -131,8 +138,7 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
     })
   } catch (err: any) {
     const message = t(err?.name === 'AbortError' ? 'common.api.timeout' : 'common.api.networkError')
-    notifyError(message)
-    return Promise.reject(createNotifiedError(message))
+    return rejectRequest(message)
   } finally {
     clearTimeout(timer)
   }
@@ -149,14 +155,12 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
       if (response.status === 401 && !isLoginEndpoint(path)) {
         redirectToLogin()
       }
-      notifyError(message)
-      return Promise.reject(createNotifiedError(message))
+      return rejectRequest(message)
     }
     if (contentType.includes('application/json')) {
       const fallbackMessage = t('common.api.requestFailed')
       const message = await readBlobErrorMessage(blob, fallbackMessage)
-      notifyError(message)
-      return Promise.reject(createNotifiedError(message))
+      return rejectRequest(message)
     }
     return { data: blob, headers: responseHeadersToObject(response.headers) }
   }
@@ -172,12 +176,10 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
       if (status === 401 && !isLoginEndpoint(path)) {
         redirectToLogin()
       }
-      notifyError(message)
-      return Promise.reject(createNotifiedError(message))
+      return rejectRequest(message)
     }
     const message = t('common.api.responseMissing')
-    notifyError(message)
-    return Promise.reject(createNotifiedError(message))
+    return rejectRequest(message)
   }
 
   // HTTP error with JSON body
@@ -187,8 +189,7 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
     if (status === 401 && !isLoginEndpoint(path)) {
       redirectToLogin()
     }
-    notifyError(message)
-    return Promise.reject(createNotifiedError(message))
+    return rejectRequest(message)
   }
 
   // Business error check
@@ -196,16 +197,14 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
     const fallbackMessage = t('common.api.requestFailed')
     const message = data.msg || fallbackMessage
     if (data.status_code === 401 && !isLoginEndpoint(path)) {
-      notifyError(message)
       redirectToLogin()
-      return Promise.reject(createNotifiedError(message))
+      return rejectRequest(message)
     }
     // 合规声明拦截：消息由路由守卫/页面 wrapper 处理，不展示通用 toast
     if (message === 'compliance_required' || message === 'compliance_required_by_super_admin') {
       return Promise.reject(createNotifiedError(message))
     }
-    notifyError(message)
-    return Promise.reject(createNotifiedError(message))
+    return rejectRequest(message)
   }
 
   return { data }

@@ -98,6 +98,10 @@ func (r staticMappingRepo) GetByID(_ uint) (*mappingdomain.Mapping, error) {
 	return r.mapping, nil
 }
 
+func (r staticMappingRepo) GetByIDForUpdate(id uint) (*mappingdomain.Mapping, error) {
+	return r.GetByID(id)
+}
+
 func (r staticMappingRepo) Update(_ *mappingdomain.Mapping) error {
 	return nil
 }
@@ -135,7 +139,7 @@ func bindFakeAvailabilityTransaction(svc *Service) {
 
 // recordingSKURepo 记录被写回的 SKU，用来断言价格没被动过。
 type recordingSKURepo struct {
-	mappingcontract.SKURepository
+	mappingcontract.AvailabilitySKURepository
 	updates []*productdomain.ProductSKU
 }
 
@@ -290,7 +294,7 @@ func (a *parentCategoryAdapter) GetProduct(_ context.Context, _ uint) (*upstream
 
 // creatingSKURepo 记录被创建的新 SKU。
 type creatingSKURepo struct {
-	mappingcontract.SKURepository
+	mappingcontract.AvailabilitySKURepository
 	created []*productdomain.ProductSKU
 }
 
@@ -345,7 +349,7 @@ func (staticProductRepo) QuickUpdate(_ string, _ map[string]interface{}) error {
 
 // recordingMappingRepo 把映射状态更新记录下来。
 type recordingMappingRepo struct {
-	mappingcontract.MappingRepository
+	mappingcontract.AvailabilityMappingRepository
 	mapping *mappingdomain.Mapping
 }
 

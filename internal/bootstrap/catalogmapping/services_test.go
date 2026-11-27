@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -1405,5 +1406,116 @@ func TestDeleteMappingPreservesConcurrentLocalProductEdits(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// 一个映射的第二个规格或商品基准价写入失败时，已经写过的规格价格必须一起回滚。
+// 另一个映射继续提交，成功数只能统计完整提交的商品；单写连接同时验证事务绑定。
+func TestReapplyMarkupRollsBackFailedProductAndContinuesOtherMappings(t *testing.T) {
+	for _, failurePoint := range []string{"second sku", "product base price"} {
+		t.Run(failurePoint, func(t *testing.T) {
+			svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t, filepath.Join(t.TempDir(), "markup_rollback.db"), func(w http.ResponseWriter, _ *http.Request) {
+				t.Error("local markup reapply must not request upstream")
+				w.WriteHeader(http.StatusInternalServerError)
+			})
+			defer cleanup()
+			pool, err := db.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool.SetMaxOpenConns(1)
+			defer pool.Close()
+			if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Updates(map[string]interface{}{"exchange_rate": 2, "price_markup_percent": 40}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&productdomain.Product{}).Where("id = ?", mapping.LocalProductID).Updates(map[string]interface{}{"price_amount": "20.00", "cost_price_amount": "8.00"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			var firstMapping mappingdomain.SKUMapping
+			if err := db.Where("product_mapping_id = ?", mapping.ID).First(&firstMapping).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&productdomain.ProductSKU{}).Where("id = ?", firstMapping.LocalSKUID).Updates(map[string]interface{}{"price_amount": "20.00", "cost_price_amount": "8.00"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&mappingdomain.SKUMapping{}).Where("id = ?", firstMapping.ID).Update("upstream_price", "5.00").Error; err != nil {
+				t.Fatal(err)
+			}
+			second := productdomain.ProductSKU{ProductID: mapping.LocalProductID, SKUCode: "SKU-B", PriceAmount: money.FromDecimal(decimal.NewFromInt(30)), CostPriceAmount: money.FromDecimal(decimal.NewFromInt(12)), IsActive: true}
+			if err := db.Create(&second).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&mappingdomain.SKUMapping{ProductMappingID: mapping.ID, LocalSKUID: second.ID, UpstreamSKUID: 202, UpstreamPrice: money.FromDecimal(decimal.NewFromInt(7)), UpstreamIsActive: true}).Error; err != nil {
+				t.Fatal(err)
+			}
+			other := productdomain.Product{CategoryID: 1, Slug: "markup-success", TitleJSON: jsonmap.JSON{"zh-CN": "成功商品"}, PriceAmount: money.FromDecimal(decimal.NewFromInt(50)), CostPriceAmount: money.FromDecimal(decimal.NewFromInt(20)), FulfillmentType: constants.FulfillmentTypeUpstream, IsMapped: true, IsActive: true}
+			if err := db.Create(&other).Error; err != nil {
+				t.Fatal(err)
+			}
+			otherSKU := productdomain.ProductSKU{ProductID: other.ID, SKUCode: "SKU-C", PriceAmount: other.PriceAmount, CostPriceAmount: other.CostPriceAmount, IsActive: true}
+			if err := db.Create(&otherSKU).Error; err != nil {
+				t.Fatal(err)
+			}
+			otherMapping := mappingdomain.Mapping{ConnectionID: mapping.ConnectionID, LocalProductID: other.ID, UpstreamProductID: 102, IsActive: true, UpstreamStatus: mappingdomain.UpstreamStatusActive}
+			if err := db.Create(&otherMapping).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&mappingdomain.SKUMapping{ProductMappingID: otherMapping.ID, LocalSKUID: otherSKU.ID, UpstreamSKUID: 203, UpstreamPrice: money.FromDecimal(decimal.NewFromInt(10)), UpstreamIsActive: true}).Error; err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("injected markup write failure")
+			written := make(map[uint]bool)
+			if err := db.Callback().Update().After("gorm:update").Register("test:fail_reapply_write", func(tx *gorm.DB) {
+				if tx.Error != nil || len(tx.Statement.Vars) == 0 {
+					return
+				}
+				// 在 SQL 已执行后注错，确保回滚的确撤销已经发生的写入。
+				id := fmt.Sprint(tx.Statement.Vars[len(tx.Statement.Vars)-1])
+				if tx.Statement.Table == "product_skus" {
+					if id == strconv.FormatUint(uint64(firstMapping.LocalSKUID), 10) {
+						written[firstMapping.LocalSKUID] = true
+					}
+					if id == strconv.FormatUint(uint64(second.ID), 10) {
+						written[second.ID] = true
+					}
+				}
+				if failurePoint == "second sku" && tx.Statement.Table == "product_skus" && id == strconv.FormatUint(uint64(second.ID), 10) || failurePoint == "product base price" && tx.Statement.Table == "products" && id == strconv.FormatUint(uint64(mapping.LocalProductID), 10) {
+					tx.AddError(failure)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := svc.ReapplyMarkupLocal(mapping.ConnectionID)
+			if updated != 1 || !errors.Is(err, failure) {
+				t.Fatalf("reapply = (%d, %v), want one committed product and injected error", updated, err)
+			}
+			if !written[firstMapping.LocalSKUID] || !written[second.ID] {
+				t.Fatalf("fault did not occur after writing both SKU prices: %v", written)
+			}
+			for _, want := range []struct {
+				id          uint
+				price, cost string
+			}{{firstMapping.LocalSKUID, "20.00", "8.00"}, {second.ID, "30.00", "12.00"}, {otherSKU.ID, "28.00", "20.00"}} {
+				var got productdomain.ProductSKU
+				if err := db.First(&got, want.id).Error; err != nil {
+					t.Fatal(err)
+				}
+				if got.PriceAmount.String() != want.price || got.CostPriceAmount.String() != want.cost {
+					t.Fatalf("SKU %d price/cost = %s/%s, want %s/%s", want.id, got.PriceAmount.String(), got.CostPriceAmount.String(), want.price, want.cost)
+				}
+			}
+			for _, want := range []struct {
+				id          uint
+				price, cost string
+			}{{mapping.LocalProductID, "20.00", "8.00"}, {other.ID, "28.00", "20.00"}} {
+				var got productdomain.Product
+				if err := db.First(&got, want.id).Error; err != nil {
+					t.Fatal(err)
+				}
+				if got.PriceAmount.String() != want.price || got.CostPriceAmount.String() != want.cost {
+					t.Fatalf("product %d price/cost = %s/%s, want %s/%s", want.id, got.PriceAmount.String(), got.CostPriceAmount.String(), want.price, want.cost)
+				}
+			}
+		})
 	}
 }

@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, type RequestOptions } from './client'
 import type {
   AdminBackupConfigUpdate,
   AdminCategory,
@@ -645,7 +645,8 @@ export const adminAPI = {
   deleteSiteConnection: (id: number) => api.delete(`/admin/site-connections/${id}`),
   pingSiteConnection: (id: number) => api.post(`/admin/site-connections/${id}/ping`),
   updateSiteConnectionStatus: (id: number, data: { is_active?: boolean; status?: string }) => api.put(`/admin/site-connections/${id}/status`, data),
-  reapplyConnectionMarkup: (id: number) => api.post(`/admin/site-connections/${id}/reapply-markup`),
+  reapplyConnectionMarkup: (id: number, options?: Pick<RequestOptions, 'skipErrorNotification'>) =>
+    api.post(`/admin/site-connections/${id}/reapply-markup`, undefined, options),
   // Product Mappings
   getProductMappings: (params?: Record<string, unknown>) => api.get('/admin/product-mappings', { params }),
   getProductMapping: (id: number) => api.get(`/admin/product-mappings/${id}`),

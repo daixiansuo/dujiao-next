@@ -10,6 +10,7 @@ import (
 	"github.com/dujiao-next/internal/persistence/gormutil"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MappingStore 是 Catalog 上游映射端口的 GORM 实现。
@@ -218,4 +219,16 @@ func (r *MappingStore) UpdateSyncMetadata(id uint, categoryID uint, fulfillment 
 			"upstream_category_id":      categoryID,
 			"upstream_fulfillment_type": fulfillment,
 		}).Error
+}
+
+// GetByIDForUpdate 在事务内先锁映射，保持与同步、停售相同的锁顺序。
+// 不预加载关联，SQLite 由单写事务串行，PostgreSQL 使用行锁。
+func (r *MappingStore) GetByIDForUpdate(id uint) (*mappingdomain.Mapping, error) {
+	var mapping mappingdomain.Mapping
+	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND deleted_at IS NULL", id).First(&mapping).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &mapping, err
 }

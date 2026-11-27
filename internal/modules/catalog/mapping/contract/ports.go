@@ -6,6 +6,7 @@ import (
 
 	categoryapp "github.com/dujiao-next/internal/modules/catalog/category/application"
 	categorydomain "github.com/dujiao-next/internal/modules/catalog/category/domain"
+	mappingdomain "github.com/dujiao-next/internal/modules/catalog/mapping/domain"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 	settingsintegration "github.com/dujiao-next/internal/modules/settings/schema/integration"
 	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
@@ -54,6 +55,7 @@ type UnavailabilityReporter interface {
 // AvailabilityMappingRepository 只更新同步字段，不覆盖运营手动启停的映射开关。
 type AvailabilityMappingRepository interface {
 	MappingRepository
+	GetByIDForUpdate(id uint) (*mappingdomain.Mapping, error)
 	UpdateSyncState(id uint, status string, syncedAt time.Time) error
 	UpdateSyncMetadata(id uint, categoryID uint, fulfillment string) error
 }
@@ -65,10 +67,11 @@ type AvailabilitySKUMappingRepository interface {
 	UpdatePrice(id uint, price money.Amount) error
 }
 
-// AvailabilitySKURepository 停售仅写启用字段，不回写旧价格和其他规格属性。
+// AvailabilitySKURepository 分开写入停售、同步和价格字段，避免旧快照互相覆盖。
 type AvailabilitySKURepository interface {
 	SKURepository
 	SetInactive(id uint) error
+	UpdatePrices(id uint, price, cost money.Amount) error
 	UpdateSyncFields(item *productdomain.ProductSKU, applyPrice bool) error
 }
 

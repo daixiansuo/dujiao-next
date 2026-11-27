@@ -17,6 +17,7 @@ import (
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/logger"
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
+	settingsintegration "github.com/dujiao-next/internal/modules/settings/schema/integration"
 	"github.com/dujiao-next/internal/shared/jsonmap"
 	"github.com/dujiao-next/internal/shared/jsonslice"
 	"github.com/dujiao-next/internal/shared/money"
@@ -725,7 +726,7 @@ func (s *Service) ListUpstreamCategoryCounts(ctx context.Context, connectionID u
 		return nil, 0, err
 	}
 
-	products, err := listAllUpstreamProducts(ctx, adapter)
+	products, err := listAllUpstreamProducts(ctx, adapter, s.upstreamScanPageSize())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -736,18 +737,29 @@ func (s *Service) ListUpstreamCategoryCounts(ctx context.Context, connectionID u
 	return counts, len(products), nil
 }
 
-// maxUpstreamProductPages 全量翻页的页数上限（每页 200 条，即 20 万条商品）。
+// maxUpstreamProductPages 全量翻页的页数上限。
 // 上游若忽略 page 参数且 total 异常，翻页条件永远不满足，靠它兜底防止死循环。
 const maxUpstreamProductPages = 1000
 
-// upstreamProductPageSize 全量翻页时每页请求的商品数。上游 page_size 上限为 200，
-// 按上限请求能把翻页次数（以及触达上游 60 次/分钟限流的概率）压到四分之一。
-const upstreamProductPageSize = 200
+// upstreamScanPageSize 让分类统计、批量导入和分类回填复用同步分页设置。
+// 部分旧上游会直接拒绝超过自身上限的请求，不能再固定请求 200 后等待上游裁剪。
+func (s *Service) upstreamScanPageSize() int {
+	defaults := settingsintegration.DefaultUpstreamSyncConfig()
+	if s == nil || s.settings == nil {
+		return defaults.SyncPageSize
+	}
+	cfg, err := s.settings.GetUpstreamSyncConfig("")
+	if err != nil {
+		logger.Warnw("upstream_scan_page_size_fallback", "page_size", defaults.SyncPageSize, "error", err)
+		return defaults.SyncPageSize
+	}
+	return settingsintegration.NormalizeUpstreamSyncConfig(cfg).SyncPageSize
+}
 
 // listAllUpstreamProducts 逐页拉取上游全部商品。
 // 旧版上游会把 page_size 压到 50，所以不能拿"返回条数 < 请求条数"直接判定最后一页，
 // 要先看响应里的总数和 page_size 回声，否则商品多的站点只会拉到第一页。
-func listAllUpstreamProducts(ctx context.Context, adapter upstream.Adapter) ([]upstream.UpstreamProduct, error) {
+func listAllUpstreamProducts(ctx context.Context, adapter upstream.Adapter, pageSize int) ([]upstream.UpstreamProduct, error) {
 	products := make([]upstream.UpstreamProduct, 0)
 	seen := make(map[uint]struct{})
 	for page := 1; page <= maxUpstreamProductPages; page++ {
@@ -756,11 +768,11 @@ func listAllUpstreamProducts(ctx context.Context, adapter upstream.Adapter) ([]u
 		pageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		result, err := adapter.ListProducts(pageCtx, upstream.ListProductsOpts{
 			Page:     page,
-			PageSize: upstreamProductPageSize,
+			PageSize: pageSize,
 		})
 		cancel()
 		if err != nil {
-			return nil, fmt.Errorf("fetch upstream products page %d: %w", page, err)
+			return nil, fmt.Errorf("fetch upstream products page %d (page_size=%d): %w", page, pageSize, err)
 		}
 		if len(result.Items) == 0 {
 			// 翻页期间上游可能刚好新增/下架商品，导致 total 与实际可翻到的数量不一致，
@@ -789,7 +801,7 @@ func listAllUpstreamProducts(ctx context.Context, adapter upstream.Adapter) ([]u
 		if result.Total <= 0 {
 			effectivePageSize := result.PageSize
 			if effectivePageSize <= 0 {
-				effectivePageSize = upstreamProductPageSize
+				effectivePageSize = pageSize
 			}
 			if len(result.Items) < effectivePageSize {
 				return products, nil

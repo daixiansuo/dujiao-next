@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -521,13 +522,17 @@ func TestCheckUpstreamPurchasableAlwaysChecksFreshAvailability(t *testing.T) {
 }
 
 type availabilitySettingsProvider struct {
-	enabled bool
-	err     error
+	enabled  bool
+	pageSize int
+	err      error
 }
 
 func (p availabilitySettingsProvider) GetUpstreamSyncConfig(string) (settingsintegration.UpstreamSyncConfig, error) {
 	cfg := settingsintegration.DefaultUpstreamSyncConfig()
 	cfg.PreOrderStockCheckEnabled = p.enabled
+	if p.pageSize > 0 {
+		cfg.SyncPageSize = p.pageSize
+	}
 	return cfg, p.err
 }
 
@@ -1003,5 +1008,109 @@ func TestSyncOldSnapshotCannotOverwriteNewPurchaseRejection(t *testing.T) {
 				t.Fatalf("old sync snapshot overwrote newer rejection: %+v", got)
 			}
 		})
+	}
+}
+
+// 模拟 CEOACC 的实际限制：超过 50 直接返回 400，不替客户端裁剪分页大小。
+// 分类统计、回填与导入必须沿用相同的同步设置，避免只有库存任务修好了分页。
+func TestUpstreamFullScansUseConfiguredPageSize(t *testing.T) {
+	restorePacing := upstream.SetRequestPacing(0, 0)
+	defer restorePacing()
+	for _, pageSize := range []int{30, 50} {
+		for _, entry := range []string{"category counts", "category import", "batch selected import", "markup category backfill"} {
+			t.Run(fmt.Sprintf("page_size=%d/%s", pageSize, entry), func(t *testing.T) {
+				products := make([]upstream.UpstreamProduct, 55)
+				for i := range products {
+					products[i] = upstream.UpstreamProduct{
+						ID: uint(1001 + i), CategoryID: 9, Slug: fmt.Sprintf("scan-product-%d", i), Title: jsonmap.JSON{"zh-CN": "分页测试商品"}, PriceAmount: "10.00", IsActive: true,
+						SKUs: []upstream.UpstreamSKU{{ID: uint(2001 + i), SKUCode: "SKU-A", PriceAmount: "10.00", IsActive: true, StockQuantity: 10}},
+					}
+				}
+				var lists, details, rejected atomic.Int32
+				svc, db, mapping, _ := setupAvailabilityTest(t, func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch r.URL.Path {
+					case "/api/v1/upstream/products":
+						lists.Add(1)
+						size, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+						page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+						if size > 50 || size < 1 || page < 1 {
+							rejected.Add(1)
+							w.WriteHeader(http.StatusBadRequest)
+							_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_message": "分页参数无效"})
+							return
+						}
+						if size != pageSize {
+							t.Errorf("request page_size = %d, want configured %d", size, pageSize)
+						}
+						start, end := (page-1)*size, page*size
+						if start > len(products) {
+							start = len(products)
+						}
+						if end > len(products) {
+							end = len(products)
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "items": products[start:end], "total": len(products), "page": page, "page_size": size})
+					case "/api/v1/upstream/categories":
+						_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "categories": []upstream.UpstreamCategory{{ID: 9, Name: jsonmap.JSON{"zh-CN": "测试分类"}}}})
+					default:
+						details.Add(1)
+						http.NotFound(w, r)
+					}
+				})
+				svc.SetSettings(availabilitySettingsProvider{pageSize: pageSize})
+				switch entry {
+				case "category counts":
+					counts, total, err := svc.ListUpstreamCategoryCounts(context.Background(), mapping.ConnectionID)
+					if err != nil || total != len(products) || counts[9] != len(products) {
+						t.Fatalf("counts = %v total = %d err = %v", counts, total, err)
+					}
+				case "category import":
+					result, err := svc.BatchImportByCategory(mapping.ConnectionID, 9, false, 1)
+					if err != nil || result == nil || result.Total != len(products) || result.SuccessCount != len(products) {
+						t.Fatalf("category import result = %+v err = %v", result, err)
+					}
+				case "batch selected import":
+					ids := make([]uint, 50)
+					for i := range ids {
+						ids[i] = products[i].ID
+					}
+					results, err := svc.BatchImportUpstreamProducts(mapping.ConnectionID, ids, 1, false)
+					if err != nil || len(results) != len(ids) {
+						t.Fatalf("batch results = %d err = %v", len(results), err)
+					}
+					for _, result := range results {
+						if result.Err != nil {
+							t.Fatalf("product %d import: %v", result.UpstreamProductID, result.Err)
+						}
+					}
+				case "markup category backfill":
+					if err := db.Model(&mappingdomain.Mapping{}).Where("id = ?", mapping.ID).Update("upstream_product_id", products[0].ID).Error; err != nil {
+						t.Fatal(err)
+					}
+					if err := db.Model(&siteconnectiondomain.Connection{}).Where("id = ?", mapping.ConnectionID).Update("category_markups", jsonmap.JSON{"9": 10}).Error; err != nil {
+						t.Fatal(err)
+					}
+					updated, err := svc.ReapplyMarkup(mapping.ConnectionID)
+					if err != nil || updated != 1 {
+						t.Fatalf("markup updated = %d err = %v", updated, err)
+					}
+					var got mappingdomain.Mapping
+					if err := db.First(&got, mapping.ID).Error; err != nil {
+						t.Fatal(err)
+					}
+					if got.UpstreamCategoryID != 9 {
+						t.Fatalf("category not backfilled: %+v", got)
+					}
+				}
+				wantLists := int32(2)
+				if entry == "batch selected import" {
+					wantLists++
+				}
+				if rejected.Load() != 0 || details.Load() != 0 || lists.Load() != wantLists {
+					t.Fatalf("list calls = %d, want %d; rejected = %d detail calls = %d", lists.Load(), wantLists, rejected.Load(), details.Load())
+				}
+			})
+		}
 	}
 }

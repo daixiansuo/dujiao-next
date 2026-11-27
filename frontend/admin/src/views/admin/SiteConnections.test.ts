@@ -135,6 +135,34 @@ describe('connection pricing form', () => {
     expect(adminAPI.reapplyConnectionMarkup).not.toHaveBeenCalled()
   })
 
+  it('reports one complete error when saving succeeds but category recalculation fails', async () => {
+    saved.category_markups = { '5': 50 }
+    vi.mocked(adminAPI.reapplyConnectionMarkup).mockRejectedValue(new Error('无法获取上游分类'))
+    await mount()
+    await edit()
+    await setInput('price-markup-percent', '45')
+    await submit()
+    expect(adminAPI.updateSiteConnection).toHaveBeenCalled()
+    expect(adminAPI.reapplyConnectionMarkup).toHaveBeenCalledWith(1, { skipErrorNotification: true })
+    expect(notifyError).toHaveBeenCalledExactlyOnceWith('连接已保存，但自动重算价格失败: 无法获取上游分类')
+    expect(notifySuccess).not.toHaveBeenCalled()
+    expect(document.querySelector('form')).toBeNull()
+  })
+
+  it('does not repeat the API notification for manual recalculation or save failures', async () => {
+    vi.mocked(adminAPI.reapplyConnectionMarkup).mockRejectedValue(Object.assign(new Error('重算失败'), { __notified: true }))
+    await mount()
+    button('重新应用加价').click()
+    await flush()
+    expect(adminAPI.reapplyConnectionMarkup).toHaveBeenCalledWith(1)
+    expect(notifyError).not.toHaveBeenCalled()
+    vi.mocked(adminAPI.updateSiteConnection).mockRejectedValue(Object.assign(new Error('保存失败'), { __notified: true }))
+    await edit()
+    await submit()
+    expect(notifyError).not.toHaveBeenCalled()
+    expect(document.querySelector('form')).not.toBeNull()
+  })
+
   it('keeps category percentages dormant in fixed mode without reapplying on a rename', async () => {
     saved.price_markup_mode = 'fixed_amount'
     saved.category_markups = { '5': 50 }

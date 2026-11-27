@@ -5,6 +5,7 @@ import (
 
 	ginutil "github.com/dujiao-next/internal/platform/http/ginutil"
 
+	mappingcontract "github.com/dujiao-next/internal/modules/catalog/mapping/contract"
 	siteconnectionapp "github.com/dujiao-next/internal/modules/siteconnection/application"
 	siteconnectioncontract "github.com/dujiao-next/internal/modules/siteconnection/contract"
 	siteconnectiondomain "github.com/dujiao-next/internal/modules/siteconnection/domain"
@@ -192,6 +193,10 @@ func (h *AdminHandler) ReapplyConnectionMarkup(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, siteconnectioncontract.ErrNotFound) {
 			ginutil.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
+			return
+		}
+		if errors.Is(err, mappingcontract.ErrUpstreamCategoryUnavailable) {
+			ginutil.RespondError(c, response.CodeInternal, "error.reapply_categories_unavailable", err)
 			return
 		}
 		ginutil.RespondError(c, response.CodeInternal, "error.reapply_markup_failed", err)

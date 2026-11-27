@@ -131,7 +131,7 @@ func TestResolveCategoryMarkup(t *testing.T) {
 
 // markupReapplyMappings 只实现 reapplyMarkupPrices 用到的方法。
 type markupReapplyMappings struct {
-	mappingcontract.MappingRepository
+	mappingcontract.AvailabilityMappingRepository
 	byConnection []mappingdomain.Mapping
 }
 
@@ -139,8 +139,17 @@ func (m *markupReapplyMappings) ListActiveByConnection(connectionID uint) ([]map
 	return m.byConnection, nil
 }
 
+func (m *markupReapplyMappings) GetByIDForUpdate(id uint) (*mappingdomain.Mapping, error) {
+	for i := range m.byConnection {
+		if m.byConnection[i].ID == id {
+			return &m.byConnection[i], nil
+		}
+	}
+	return nil, nil
+}
+
 type markupReapplySKUMappings struct {
-	mappingcontract.SKUMappingRepository
+	mappingcontract.AvailabilitySKUMappingRepository
 	byProductMapping map[uint][]mappingdomain.SKUMapping
 }
 
@@ -149,7 +158,7 @@ func (m *markupReapplySKUMappings) ListByProductMapping(productMappingID uint) (
 }
 
 type markupReapplySKUs struct {
-	mappingcontract.SKURepository
+	mappingcontract.AvailabilitySKURepository
 	items  map[uint]*productdomain.ProductSKU
 	update []uint
 }
@@ -158,9 +167,9 @@ func (m *markupReapplySKUs) GetByID(id uint) (*productdomain.ProductSKU, error) 
 	return m.items[id], nil
 }
 
-func (m *markupReapplySKUs) Update(item *productdomain.ProductSKU) error {
-	m.update = append(m.update, item.ID)
-	m.items[item.ID] = item
+func (m *markupReapplySKUs) UpdatePrices(id uint, price, cost money.Amount) error {
+	m.update = append(m.update, id)
+	m.items[id].PriceAmount, m.items[id].CostPriceAmount = price, cost
 	return nil
 }
 
@@ -186,6 +195,12 @@ func (m *markupReapplyProducts) GetByID(id string) (*productdomain.Product, erro
 
 func (m *markupReapplyProducts) Update(item *productdomain.Product) error {
 	m.items[strconv.FormatUint(uint64(item.ID), 10)] = item
+	return nil
+}
+
+func (m *markupReapplyProducts) QuickUpdate(id string, fields map[string]interface{}) error {
+	m.items[id].PriceAmount = fields["price_amount"].(money.Amount)
+	m.items[id].CostPriceAmount = fields["cost_price_amount"].(money.Amount)
 	return nil
 }
 
@@ -215,15 +230,15 @@ func TestReapplyMarkupLocalSkipsMappingsWithoutCategoryTree(t *testing.T) {
 
 	// 三个映射：分类直接配置 / 继承父分类 / 分类 ID 为 0。
 	direct := &markupReapplyMappings{byConnection: []mappingdomain.Mapping{
-		{ID: 1, LocalProductID: 101, UpstreamCategoryID: 500},
-		{ID: 2, LocalProductID: 102, UpstreamCategoryID: 601}, // 601 无配置，需继承 600
-		{ID: 3, LocalProductID: 103, UpstreamCategoryID: 0},
+		{ID: 1, ConnectionID: 7, LocalProductID: 101, UpstreamCategoryID: 500, IsActive: true},
+		{ID: 2, ConnectionID: 7, LocalProductID: 102, UpstreamCategoryID: 601, IsActive: true}, // 601 无配置，需继承 600
+		{ID: 3, ConnectionID: 7, LocalProductID: 103, UpstreamCategoryID: 0, IsActive: true},
 	}}
 
 	skus := &markupReapplySKUs{items: map[uint]*productdomain.ProductSKU{
-		1: {ID: 1, ProductID: 101, PriceAmount: money.FromDecimal(decimal.NewFromInt(10))},
-		2: {ID: 2, ProductID: 102, PriceAmount: money.FromDecimal(decimal.NewFromInt(10))},
-		3: {ID: 3, ProductID: 103, PriceAmount: money.FromDecimal(decimal.NewFromInt(10))},
+		1: {ID: 1, ProductID: 101, IsActive: true, PriceAmount: money.FromDecimal(decimal.NewFromInt(10))},
+		2: {ID: 2, ProductID: 102, IsActive: true, PriceAmount: money.FromDecimal(decimal.NewFromInt(10))},
+		3: {ID: 3, ProductID: 103, IsActive: true, PriceAmount: money.FromDecimal(decimal.NewFromInt(10))},
 	}}
 	skuMappings := &markupReapplySKUMappings{byProductMapping: map[uint][]mappingdomain.SKUMapping{
 		1: {{ID: 1, ProductMappingID: 1, LocalSKUID: 1, UpstreamPrice: money.FromDecimal(decimal.NewFromInt(10))}},
@@ -244,6 +259,7 @@ func TestReapplyMarkupLocalSkipsMappingsWithoutCategoryTree(t *testing.T) {
 		connections: &markupReapplyConnections{conn: conn},
 	}
 
+	bindFakeAvailabilityTransaction(svc)
 	updated, err := svc.ReapplyMarkupLocal(7)
 	if err != nil {
 		t.Fatalf("reapply local failed: %v", err)
@@ -350,7 +366,14 @@ func TestRecalcProductPriceUpdatesOnlyIndependentMinimumPrices(t *testing.T) {
 			svc := &Service{products: products, skus: skuReader}
 			product := &productdomain.Product{ID: 42, PriceAmount: amount("100"), CostPriceAmount: amount("90")}
 
-			svc.recalcProductPrice(product)
+			err := svc.recalcProductPrice(product)
+			wantErr := tc.listErr
+			if wantErr == nil {
+				wantErr = tc.updateErr
+			}
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("recalc error = %v, want %v", err, wantErr)
+			}
 
 			if skuReader.productID != product.ID || !skuReader.onlyActive {
 				t.Fatalf("must query only active SKUs for product %d, got id=%d active=%v", product.ID, skuReader.productID, skuReader.onlyActive)
