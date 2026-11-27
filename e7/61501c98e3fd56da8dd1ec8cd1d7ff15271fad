@@ -1,0 +1,21 @@
+openspec/specs/storefront-customization/spec.md
+  s_4f573a8a225bd6::t_ce1e35c28e5a76 77-83
+frontend/user/src/templates/atelier/components/AtelierProductCard.vue
+  s_4f573a8a225bd6::t_255cc18b5148da 66-67,80-86,218-224,360,366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20261123",
+  "base_commit_sha": "e761501c98e3fd56da8dd1ec8cd1d7ff15271fad",
+  "prompts": {},
+  "sessions": {
+    "s_4f573a8a225bd6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21d42-f8fc-7801-bb71-d78bef82a949",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
