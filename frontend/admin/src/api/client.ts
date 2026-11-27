@@ -68,8 +68,8 @@ function getHttpErrorMessage(status: number): string {
 }
 
 const baseURL = `${API_BASE_URL}${API_PREFIX}`
-// 与后端 http.Server WriteTimeout（60s）对齐，大表查询/导出/上传不应被前端提前中断
-const timeout = 60000
+// 与后端 http.Server WriteTimeout（120s）对齐，允许完整价格重算等较慢请求完成。
+const timeout = 120000
 
 function responseHeadersToObject(headers: Headers): Record<string, string> {
   const result: Record<string, string> = {}

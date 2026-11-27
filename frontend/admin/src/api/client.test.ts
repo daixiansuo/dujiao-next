@@ -6,11 +6,41 @@ const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
 vi.mock('@/utils/notify', () => ({ notifyError }))
 
 beforeEach(() => { vi.clearAllMocks(); localStorage.clear() })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 const failedResponse = (status = 200, code = 500) => new Response(
   JSON.stringify({ status_code: code, msg: '分类重算失败' }), { status },
 )
+
+describe('API request timeout', () => {
+  it('allows the observed 63.3-second markup recalculation to complete', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, options: RequestInit) => new Promise((resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      setTimeout(() => resolve(new Response(JSON.stringify({ status_code: 0, data: { updated_products: 394 } }))), 63303)
+    })))
+    const result = adminAPI.reapplyConnectionMarkup(1).then(response => response, error => error)
+    await vi.advanceTimersByTimeAsync(63303)
+    expect((await result).data.data.updated_products).toBe(394)
+    expect(notifyError).not.toHaveBeenCalled()
+  })
+
+  it('still aborts a stalled request after two minutes', async () => {
+    vi.useFakeTimers()
+    let signal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, options: RequestInit) => new Promise((_resolve, reject) => {
+      signal = options.signal ?? undefined
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    })))
+    const result = adminAPI.reapplyConnectionMarkup(1).catch(error => error)
+    await vi.advanceTimersByTimeAsync(119999)
+    expect(signal?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signal?.aborted).toBe(true)
+    expect(await result).toBeInstanceOf(Error)
+    expect(notifyError).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe('API error notification ownership', () => {
   it('lets automatic markup recalculation own its notification while manual requests keep the default', async () => {

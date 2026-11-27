@@ -10,7 +10,7 @@ import (
 const (
 	httpReadHeaderTimeout = 10 * time.Second
 	httpReadTimeout       = 30 * time.Second
-	httpWriteTimeout      = 60 * time.Second
+	httpWriteTimeout      = 120 * time.Second // 完整价格重算会读取上游数据，允许响应等待两分钟。
 	httpIdleTimeout       = 120 * time.Second
 	httpMaxHeaderBytes    = 1 << 20
 )
