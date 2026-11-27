@@ -1,0 +1,23 @@
+internal/app/http_service.go
+  s_4f573a8a225bd6::t_c65c32ab7a5399 13
+frontend/admin/src/api/client.ts
+  s_4f573a8a225bd6::t_fed8bea3ffded9 71-72
+frontend/admin/src/api/client.test.ts
+  s_4f573a8a225bd6::t_fed8bea3ffded9 9,15-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.5.9+local.20261123",
+  "base_commit_sha": "4675c1e84f3087c72683d8f293c8988fa0992e9f",
+  "prompts": {},
+  "sessions": {
+    "s_4f573a8a225bd6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21d42-f8fc-7801-bb71-d78bef82a949",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xiansuo.dai <xiansuo.dai@ly.com>"
+    }
+  }
+}
